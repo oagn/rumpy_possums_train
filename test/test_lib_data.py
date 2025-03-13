@@ -8,7 +8,7 @@ absl.logging.set_verbosity(absl.logging.ERROR)
 import tensorflow as tf
 from pathlib import Path
 from lib_data import (ensure_output_directory, process_samples_from_config, check_upload_format, validate_directory_structure, 
-                      print_dsinfo, create_dataframe, create_train, create_fixed, create_tensorset, load_img)
+                      print_dsinfo, create_dataframe, create_train, create_fixed, create_tensorset, load_img, create_tensorset_with_balanced_aug)
 
 class TestLibData(unittest.TestCase):
 
@@ -109,6 +109,23 @@ class TestLibData(unittest.TestCase):
         data = {'File': ['path/class1/file1.jpg', 'path/class2/file2.jpg'], 'Label': ['class1', 'class2']}
         df = pd.DataFrame(data)
         dataset = create_tensorset(df, 224, 32, 0.1, 1, "train")
+        self.assertIsInstance(dataset, tf.data.Dataset)
+
+    def test_create_tensorset_with_balanced_aug(self):
+        data = {'File': ['path/class1/file1.jpg', 'path/class1/file2.jpg', 
+                        'path/class2/file3.jpg'], 
+                'Label': ['class1', 'class1', 'class2']}
+        df = pd.DataFrame(data)
+        class_counts = {'class1': 2, 'class2': 1}
+        
+        # Test with class counts for balanced augmentation
+        dataset = create_tensorset_with_balanced_aug(
+            df, 224, 32, 0.1, class_counts, "train")
+        self.assertIsInstance(dataset, tf.data.Dataset)
+        
+        # Test without class counts (should fall back to standard behavior)
+        dataset = create_tensorset_with_balanced_aug(
+            df, 224, 32, 0.1, None, "train")
         self.assertIsInstance(dataset, tf.data.Dataset)
 
     def test_load_img(self):

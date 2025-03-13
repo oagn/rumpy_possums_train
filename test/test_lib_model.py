@@ -16,7 +16,8 @@ from lib_model import (
     unfreeze_model, 
     fit_frozen, 
     fit_progressive, 
-    calc_class_metrics
+    calc_class_metrics,
+    save_training_history
 )
 
 class TestLibModel(unittest.TestCase):
@@ -144,7 +145,16 @@ class TestLibModel(unittest.TestCase):
         mock_exponential_decay.return_value = tf.keras.optimizers.schedules.ExponentialDecay(
             initial_learning_rate=0.01, decay_steps=10000, decay_rate=0.9
         )
+        # Test without class weights
         optimizer, loss_f, act_f = configure_optimizer_and_loss(self.config, 2, self.df_size)
+        self.assertIsInstance(optimizer, optimizers.Adam)
+        self.assertIsInstance(loss_f, losses.BinaryFocalCrossentropy)
+        self.assertEqual(act_f, 'sigmoid')
+        
+        # Test with class weights
+        class_weights = {0: 1.0, 1: 2.0}
+        self.config['USE_CLASS_WEIGHTS'] = True
+        optimizer, loss_f, act_f = configure_optimizer_and_loss(self.config, 2, self.df_size, class_weights)
         self.assertIsInstance(optimizer, optimizers.Adam)
         self.assertIsInstance(loss_f, losses.BinaryFocalCrossentropy)
         self.assertEqual(act_f, 'sigmoid')
@@ -233,6 +243,30 @@ class TestLibModel(unittest.TestCase):
         model = models.Sequential([layers.Conv2D(32, (3, 3), input_shape=(224, 224, 3), name='stages_0_downsample_1_conv2d')])
         result = find_unfreeze_points(model, 'cnp', 1)
         self.assertEqual(result, ['stages_0_downsample_1_conv2d'])
+
+    def test_save_training_history(self):
+        # Create a sample history dictionary
+        histories = {
+            'loss': [0.5, 0.4, 0.3],
+            'accuracy': [0.7, 0.8, 0.9],
+            'val_loss': [0.6, 0.5, 0.4],
+            'val_accuracy': [0.6, 0.7, 0.8]
+        }
+        
+        # Create a temporary directory for testing
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            # Call the function
+            csv_path = save_training_history(histories, tmpdirname, 'test_model')
+            
+            # Check that the file was created
+            self.assertTrue(os.path.exists(csv_path))
+            
+            # Check that the file has the correct content
+            import pandas as pd
+            df = pd.read_csv(csv_path)
+            self.assertListEqual(list(df.columns), list(histories.keys()))
+            self.assertEqual(len(df), 3)  # Three epochs of data
 
 if __name__ == '__main__':
     unittest.main()
