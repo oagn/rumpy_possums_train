@@ -6,16 +6,24 @@ from huggingface_hub import hf_hub_download
 from lib_data import create_tensorset
 from sklearn import metrics
 from matplotlib import rcParams
+import pandas as pd
+import os
 
 # Configures the optimizer and loss function
-def configure_optimizer_and_loss(config, num_classes, df_size):
+def configure_optimizer_and_loss(config, num_classes, df_size, class_weights=None):
     # Determine loss function and activation function based on number of classes
     if num_classes == 2:
-        loss_f = losses.BinaryFocalCrossentropy()  # Use for binary classification tasks
-        act_f = 'sigmoid' # Use for binary classification tasks
+        if class_weights is not None and config.get('USE_CLASS_WEIGHTS', False):
+            loss_f = losses.BinaryFocalCrossentropy(class_weight=class_weights)
+        else:
+            loss_f = losses.BinaryFocalCrossentropy()
+        act_f = 'sigmoid'
     else:
-        loss_f = losses.CategoricalFocalCrossentropy()  # Use for unbalanced multi-class tasks (typical for wildlife datasets)
-        act_f = 'softmax' # Use for multi-class classification tasks
+        if class_weights is not None and config.get('USE_CLASS_WEIGHTS', False):
+            loss_f = losses.CategoricalFocalCrossentropy(class_weight=class_weights)
+        else:
+            loss_f = losses.CategoricalFocalCrossentropy()
+        act_f = 'softmax'
     lr_scheduler = config['LR_SCHEDULER'] # Learning rate scheduler
     optim = config['OPTIMIZER'] # Gradient-based optimisation algorithm
     weight_decay = float(config['OPTIM_REG']) # Weight decay regularisation for optimiser
@@ -262,3 +270,17 @@ def calc_class_metrics(model_fpath, test_fpath, output_fpath, classes, batch_siz
     cm_display.plot(cmap=plt.cm.Blues, include_values = len(class_ids) < 8, values_format = '.2g') # only include values with few classes
     plt.xticks(rotation=90, ha='center')
     plt.savefig(os.path.join(output_fpath, "confusion_matrix.png"))
+
+# Add this function to lib_model.py or update the existing fit_progressive function to save histories
+def save_training_history(histories, output_path, model_name):
+    """Save training metrics to a CSV file for later analysis"""
+    
+    # Convert history dictionary to DataFrame
+    history_df = pd.DataFrame(histories)
+    
+    # Save to CSV
+    csv_path = os.path.join(output_path, f"{model_name}_training_history.csv")
+    history_df.to_csv(csv_path, index=False)
+    print(f"Training history saved to: {csv_path}")
+    
+    return csv_path

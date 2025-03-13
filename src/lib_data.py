@@ -133,3 +133,67 @@ def create_tensorset(in_df, img_size, batch_size, magnitude=0, n_augments=0, ds_
             .prefetch(tf.data.AUTOTUNE)
         )  
     return(ds)
+
+def create_tensorset_with_balanced_aug(in_df, img_size, batch_size, magnitude=0, class_counts=None, ds_name="test"):
+    """Creates a dataset with more augmentation for minority classes"""
+    in_path = in_df['File']
+    in_class = LabelEncoder().fit_transform(in_df['Label'].values)
+    in_class = in_class.reshape(len(in_class), 1)
+    in_class = OneHotEncoder(sparse_output=False).fit_transform(in_class)
+    
+    if not (magnitude >= 0 and magnitude <= 1):
+        magnitude = 0.1
+        warnings.warn("Magnitude is out of bounds, default value set to 0.1", Warning)
+    
+    # If we have class counts, adjust augmentation accordingly
+    if ds_name == "train" and class_counts:
+        # Calculate augmentation factors based on class imbalance
+        max_count = max(class_counts.values())
+        aug_factors = {label: min(5, max(1, int(max_count / count))) 
+                      for label, count in class_counts.items()}
+        
+        # Create a list to map each sample to its augmentation factor
+        sample_labels = in_df['Label'].values
+        aug_per_sample = [aug_factors.get(label, 1) for label in sample_labels]
+        
+        # Create dataset with variable augmentation
+        def preprocess_with_aug(img_path, img_class, aug_factor):
+            img = load_img(img_path, img_size)
+            rand_aug = layers.RandAugment(
+                value_range=(0, 255), 
+                augmentations_per_image=aug_factor, 
+                magnitude=magnitude, 
+                magnitude_stddev=(magnitude/3)
+            )
+            return rand_aug(tf.cast(img, tf.uint8)), img_class
+        
+        ds = (tf.data.Dataset.from_tensor_slices((in_path, in_class, aug_per_sample))
+            .map(lambda img_path, img_class, aug_factor: preprocess_with_aug(img_path, img_class, aug_factor))
+            .batch(batch_size)
+            .prefetch(tf.data.AUTOTUNE)
+        )
+        return ds
+    
+    # If not using variable augmentation, use the standard approach
+    rand_aug = layers.RandAugment(
+        value_range=(0, 255), 
+        augmentations_per_image=3,  # Default value
+        magnitude=magnitude, 
+        magnitude_stddev=(magnitude/3)
+    )
+    
+    if ds_name == "train":
+        ds = (tf.data.Dataset.from_tensor_slices((in_path, in_class))
+            .map(lambda img_path, img_class: (load_img(img_path, img_size), img_class))
+            .batch(batch_size)
+            .map(lambda img, img_class: (rand_aug(tf.cast(img, tf.uint8)), img_class), 
+                 num_parallel_calls=tf.data.AUTOTUNE)
+            .prefetch(tf.data.AUTOTUNE)
+        )
+    else:
+        ds = (tf.data.Dataset.from_tensor_slices((in_path, in_class))
+            .map(lambda img_path, img_class: (load_img(img_path, img_size), img_class))
+            .batch(batch_size)
+            .prefetch(tf.data.AUTOTUNE)
+        )
+    return ds
