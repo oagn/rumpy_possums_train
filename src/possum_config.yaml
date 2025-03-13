@@ -1,0 +1,62 @@
+SEED: 12345 # Random seed for reproducibility of sampled datasets and model initialisation
+MODEL: 'ENS' # Using EfficientNetV2S for this project
+SAVEFILE: 'possum_disease' # Base filename to save models
+OUTPUT_PATH: '/scratch/c.c1767198/output/rumpy_possum_train' # Save Path for output files
+
+# HuggingFace Model (leave as NA to use ImageNet weights)
+REPO_ID: "bwbrook/mewc_pretrained" 
+FILENAME: "NA" # Using ImageNet weights
+
+# Paths for wildlife data (9 classes, no possums)
+TRAIN_PATH: '/scratch/c.c1767198/data/possums/data/train' 
+TEST_PATH: '/scratch/c.c1767198/data/possums/data/test'
+VAL_PATH: '/scratch/c.c1767198/data/possums/data/test' # Using test data for validation
+
+# Paths for possum disease data
+POSSUM_TRAIN_PATH: '/scratch/c.c1767198/data/possums/near_dupe_sorted/train'
+POSSUM_TEST_PATH: '/scratch/c.c1767198/data/possums/near_dupe_sorted/test'
+POSSUM_VAL_PATH: '/scratch/c.c1767198/data/possums/near_dupe_sorted/validate'
+
+# Path for unlabeled possum data
+UNLABELED_POSSUM_PATH: '/scratch/c.c1767198/data/possums/unlabeled_possums'
+
+# Pseudo-labeling settings
+PSEUDO_LABEL_CONFIDENCE: 0.7 # Minimum confidence threshold for accepting pseudo-labels
+
+# Training hyperparameters
+OPTIMIZER: 'adamw' 
+OPTIM_REG: 1e-4
+LR_SCHEDULER: 'expon'
+LEARNING_RATE: 1e-4
+BATCH_SIZE: 16
+NUM_AUG: 3
+
+FROZ_EPOCH: 10 # Number of epochs to train the frozen model
+
+BUF: 1 # Blocks to unfreeze for fine-tuning 
+PROG_STAGE_LEN: 7  # Number of progressive fine-tuning epochs 
+PROG_TOT_EPOCH: 30 # Total number of epochs required
+
+# Regularisation/augmentation progression
+MAGNITUDES:
+  - 0.2
+  - 0.4
+  - 0.6
+  - 0.8
+DROPOUTS:
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+
+# Class samples settings
+CLASS_SAMPLES_DEFAULT: 4000
+
+# For possum disease classes, we specify more samples for each class
+CLASS_SAMPLES_SPECIFIC:
+  - SAMPLES: 3177  # Use all available data
+    CLASS: "0"     # healthy
+  - SAMPLES: 1329  # Use all available data 
+    CLASS: "12"    # visible signs of disease
+  - SAMPLES: 1619  # Use all available data
+    CLASS: "99"    # occluded
