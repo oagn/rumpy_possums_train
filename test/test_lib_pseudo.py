@@ -31,6 +31,9 @@ class TestLibPseudo(unittest.TestCase):
     @patch('lib_pseudo.models.load_model')
     @patch('lib_pseudo.load_img')
     def test_generate_pseudo_labels(self, mock_load_img, mock_load_model):
+        # Add debug print
+        print("\nRunning test_generate_pseudo_labels...")
+        
         # Mock the model
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([
@@ -47,6 +50,11 @@ class TestLibPseudo(unittest.TestCase):
         
         # Run the function with mocked dependencies
         classes = ['healthy', 'disease', 'occluded']
+        print(f"Classes: {classes}")
+        print(f"Model path: {self.model_path}")
+        print(f"Unlabeled dir: {self.unlabeled_dir}")
+        print(f"Output dir: {self.output_dir}")
+        
         pseudo_df = generate_pseudo_labels(
             self.model_path, 
             self.unlabeled_dir, 
@@ -57,6 +65,12 @@ class TestLibPseudo(unittest.TestCase):
             batch_size=32
         )
         
+        # Print the result
+        print(f"Pseudo labels DataFrame shape: {pseudo_df.shape}")
+        print(f"Pseudo labels columns: {pseudo_df.columns.tolist()}")
+        if not pseudo_df.empty:
+            print(f"Sample of pseudo labels:\n{pseudo_df.head()}")
+        
         # Check that the DataFrame has the expected structure
         self.assertIn('File', pseudo_df.columns)
         self.assertIn('Label', pseudo_df.columns)
@@ -64,6 +78,7 @@ class TestLibPseudo(unittest.TestCase):
         
         # Only images with confidence >= 0.7 should be included
         self.assertEqual(len(pseudo_df), 2)  # Only 2 of the 5 images had confidence >= 0.7
+        print("test_generate_pseudo_labels completed successfully")
     
     def test_combine_datasets(self):
         # Create directories for original and pseudo-labeled data
