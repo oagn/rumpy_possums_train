@@ -13,10 +13,8 @@ import os
 def configure_optimizer_and_loss(config, num_classes, df_size, class_weights=None):
     # Determine loss function and activation function based on number of classes
     if num_classes == 2:
-        if class_weights is not None and config.get('USE_CLASS_WEIGHTS', False):
-            loss_f = losses.BinaryFocalCrossentropy(class_weight=class_weights)
-        else:
-            loss_f = losses.BinaryFocalCrossentropy()
+        # BinaryFocalCrossentropy doesn't accept class_weight directly
+        loss_f = losses.BinaryFocalCrossentropy()
         act_f = 'sigmoid'
     else:
         if class_weights is not None and config.get('USE_CLASS_WEIGHTS', False):
@@ -125,11 +123,18 @@ def build_sequential_model(model_base, num_classes, act_f, mname, dr):
     return model
 
 # Builds the classifier model
-def build_classifier(config, num_classes, df_size, img_size):
-    optimizer, loss_f, act_f = configure_optimizer_and_loss(config, num_classes, df_size)
+def build_classifier(config, num_classes, df_size, img_size, class_weights=None):
+    optimizer, loss_f, act_f = configure_optimizer_and_loss(config, num_classes, df_size, class_weights)
     model_base = import_model(img_size, mname=config['MODEL'], REPO_ID = config['REPO_ID'], FILENAME = config["FILENAME"])
     model = build_sequential_model(model_base, num_classes, act_f, mname=config['MODEL'], dr=config['DROPOUTS'][0])
-    model.compile(optimizer=optimizer, loss=loss_f, metrics=["accuracy"])
+    
+    # Apply class weights during compilation for binary classification
+    if num_classes == 2 and class_weights is not None and config.get('USE_CLASS_WEIGHTS', False):
+        model.compile(optimizer=optimizer, loss=loss_f, metrics=["accuracy"], 
+                     class_weight=class_weights)
+    else:
+        model.compile(optimizer=optimizer, loss=loss_f, metrics=["accuracy"])
+        
     print('Model built and compiled\n')
     return model
 
@@ -154,8 +159,8 @@ def find_unfreeze_points(model, mname, blocks_to_unfreeze):
     return block_starts[-blocks_to_unfreeze:] if blocks_to_unfreeze > 0 else []
 
 # Unfreezes blocks of the model for fine-tuning
-def unfreeze_model(config, model, num_classes, df_size):
-    optimizer, loss_f, act_f = configure_optimizer_and_loss(config, num_classes, df_size)
+def unfreeze_model(config, model, num_classes, df_size, class_weights=None):
+    optimizer, loss_f, act_f = configure_optimizer_and_loss(config, num_classes, df_size, class_weights)
     model.layers[0].trainable = True # Set whole model as trainable by default, then selectively freeze layers
     blocks_to_unfreeze=config['BUF']
     if blocks_to_unfreeze == 0:
@@ -183,7 +188,14 @@ def unfreeze_model(config, model, num_classes, df_size):
         for layer in model.layers[0].layers:
             if isinstance(layer, layers.BatchNormalization):
                 layer.trainable = False # Freeze only the BatchNorm layers, as these should never be trainable
-    model.compile(optimizer=optimizer, loss=loss_f, metrics=["accuracy"])
+    
+    # Apply class weights during recompilation for binary classification
+    if num_classes == 2 and class_weights is not None and config.get('USE_CLASS_WEIGHTS', False):
+        model.compile(optimizer=optimizer, loss=loss_f, metrics=["accuracy"], 
+                     class_weight=class_weights)
+    else:
+        model.compile(optimizer=optimizer, loss=loss_f, metrics=["accuracy"])
+        
     return(model)
 
 # Trains the model with the base model frozen to stabilise the classifier
