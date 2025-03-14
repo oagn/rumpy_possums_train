@@ -4,7 +4,7 @@ SAVEFILE: 'possum_disease' # Base filename to save models
 OUTPUT_PATH: '/scratch/c.c1767198/output/rumpy_possum_train' # Save Path for output files
 
 # HuggingFace Model (leave as NA to use ImageNet weights)
-REPO_ID: "bwbrook/mewc_pretrained" 
+REPO_ID: "NA" 
 FILENAME: "NA" # Using ImageNet weights
 
 # Paths for wildlife data (9 classes, no possums)
@@ -31,11 +31,11 @@ LEARNING_RATE: 1e-4
 BATCH_SIZE: 16
 NUM_AUG: 3
 
-FROZ_EPOCH: 10 # Number of epochs to train the frozen model
+FROZ_EPOCH: 1 # Number of epochs to train the frozen model
 
 BUF: 1 # Blocks to unfreeze for fine-tuning 
-PROG_STAGE_LEN: 7  # Number of progressive fine-tuning epochs 
-PROG_TOT_EPOCH: 30 # Total number of epochs required
+PROG_STAGE_LEN: 1  # Number of progressive fine-tuning epochs 
+PROG_TOT_EPOCH: 1 # Total number of epochs required
 
 # Regularisation/augmentation progression
 MAGNITUDES:
