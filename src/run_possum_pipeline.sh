@@ -52,7 +52,7 @@ conda list
 # --stage 3: Start from pseudo-labeling (requires --possum_model)
 
 start="$(date +%s)"
-time conda run -n keras-jax python python src/possum_pipeline.py --config src/possum_config.yaml
+time conda run -n keras-jax python src/possum_pipeline.py --config src/possum_config.yaml
 stop="$(date +%s)"
 finish=$(( $stop-$start ))
 echo Possum pipeline $SLURM_JOBID Job-Time $finish seconds
