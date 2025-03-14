@@ -236,7 +236,7 @@ class TestLibModel(unittest.TestCase):
 
     def test_find_unfreeze_points_vit(self):
         model = models.Sequential([layers.Conv1D(32, 3, input_shape=(224, 3), name='blocks_0_attn')])
-        result = find_unfreeze_points(model, 'vitt', 1)
+        result = find_unfreeze_points(model, 'vt', 1)
         self.assertEqual(result, ['blocks_0_attn'])
 
     def test_find_unfreeze_points_cn(self):
