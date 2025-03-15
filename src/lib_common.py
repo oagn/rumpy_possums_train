@@ -52,6 +52,7 @@ class NullStrategy:
 
 # Sets up the strategy for TensorFlow/JAX training with GPU (single or multiple) or CPU
 def setup_strategy():
+    from jax import devices
     gpus = devices()
     if any('cuda' in str(device).lower() for device in gpus):
         try:
