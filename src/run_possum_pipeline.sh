@@ -51,6 +51,13 @@ module load anaconda
 source activate keras-jax
 conda list
 
+# Set environment variables to disable XLA and configure TensorFlow
+export TF_CPP_MIN_LOG_LEVEL=3
+export KERAS_BACKEND=jax
+export TF_XLA_FLAGS="--tf_xla_enable_xla_devices=false"
+export TF_FORCE_GPU_ALLOW_GROWTH=true
+export XLA_FLAGS="--xla_gpu_cuda_data_dir=/apps/languages/cuda/11.7.0"
+
 # Run the pipeline
 # Use command line arguments to specify stages if needed:
 # --stage 0: Run all stages
