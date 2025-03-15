@@ -54,8 +54,37 @@ class NullStrategy:
 def setup_strategy():
     gpus = devices()
     if any('cuda' in str(device).lower() for device in gpus):
-        strategy = distribution.DataParallel(devices=gpus)
-        print(str(len(gpus)) + ' x GPU activated' + '\n')
+        try:
+            # Try the new approach first
+            strategy = distribution.DataParallel(devices=gpus)
+            print(str(len(gpus)) + ' x GPU activated' + '\n')
+        except (AttributeError, TypeError) as e:
+            # Fall back to a simpler approach if the DataParallel initialization fails
+            print(f"Warning: DataParallel initialization failed with error: {e}")
+            print("Falling back to single-device strategy")
+            
+            # For JAX backend
+            if os.environ.get("KERAS_BACKEND", "").lower() == "jax":
+                from jax.sharding import PositionalSharding
+                import jax
+                
+                # Create a simple positional sharding for JAX
+                devices = jax.devices()
+                if len(devices) > 0:
+                    strategy = PositionalSharding(devices)
+                    print(f"Using JAX PositionalSharding with {len(devices)} devices\n")
+                else:
+                    strategy = NullStrategy()
+                    print("No JAX devices found, using CPU-only training\n")
+            else:
+                # For TensorFlow backend, use MirroredStrategy if multiple GPUs are available
+                import tensorflow as tf
+                if len(gpus) > 1:
+                    strategy = tf.distribute.MirroredStrategy(devices=gpus)
+                    print(f"Using TensorFlow MirroredStrategy with {len(gpus)} GPUs\n")
+                else:
+                    strategy = tf.distribute.OneDeviceStrategy(device=gpus[0] if gpus else "/cpu:0")
+                    print(f"Using TensorFlow OneDeviceStrategy on {gpus[0] if gpus else 'CPU'}\n")
     else:
         strategy = NullStrategy()
         print('CPU-only training activated' + '\n')
