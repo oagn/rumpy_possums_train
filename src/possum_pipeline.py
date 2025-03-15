@@ -335,9 +335,10 @@ def main():
     # Set environment variables
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
     os.environ["KERAS_BACKEND"] = "jax"
+    # Disable XLA for TensorFlow to avoid ptxas version issues
+    os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false"
     import absl.logging
     absl.logging.set_verbosity(absl.logging.ERROR)
-
 
     parser = argparse.ArgumentParser(description='Possum disease classification pipeline')
     parser.add_argument('--stage', type=int, default=0, 
