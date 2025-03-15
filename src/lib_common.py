@@ -50,11 +50,22 @@ class NullStrategy:
             yield
         return null_scope()
 
+# Define a wrapper for JAX sharding to make it compatible with the scope() API
+class JaxShardingWrapper:
+    def __init__(self, sharding):
+        self.sharding = sharding
+    
+    def scope(self):
+        @contextmanager
+        def jax_scope():
+            yield
+        return jax_scope()
+
 # Sets up the strategy for TensorFlow/JAX training with GPU (single or multiple) or CPU
 def setup_strategy():
     from jax import devices
     gpus = devices()
-    if any('cuda' in str(device).lower() for device in gpus):
+    if any('cuda' in str(device).lower() or 'gpu' in str(device).lower() for device in gpus):
         try:
             # Try the new approach first
             strategy = distribution.DataParallel(devices=gpus)
@@ -72,7 +83,9 @@ def setup_strategy():
                 # Create a simple positional sharding for JAX
                 devices = jax.devices()
                 if len(devices) > 0:
-                    strategy = PositionalSharding(devices)
+                    # Wrap the PositionalSharding in our compatible wrapper
+                    sharding = PositionalSharding(devices)
+                    strategy = JaxShardingWrapper(sharding)
                     print(f"Using JAX PositionalSharding with {len(devices)} devices\n")
                 else:
                     strategy = NullStrategy()
