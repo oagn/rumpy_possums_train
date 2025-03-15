@@ -10,17 +10,12 @@ from pathlib import Path
 import argparse
 from keras import models
 
-# Set environment variables
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-os.environ["KERAS_BACKEND"] = "jax"
-import absl.logging
-absl.logging.set_verbosity(absl.logging.ERROR)
-
 # Import custom modules
-from lib_common import update_config_from_env, model_img_size_mapping, read_yaml, setup_strategy
 from lib_model import build_classifier, fit_frozen, fit_progressive, calc_class_metrics, unfreeze_model, save_training_history
 from lib_data import print_dsinfo, create_train, create_fixed, process_samples_from_config, ensure_output_directory, validate_directory_structure
 from lib_pseudo import generate_pseudo_labels, combine_datasets
+from lib_common import update_config_from_env, model_img_size_mapping, read_yaml, setup_strategy
+
 
 def train_wildlife_model(config, strategy):
     """Train the initial model on wildlife data (9 classes)"""
@@ -337,6 +332,13 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     return best_model_fpath
 
 def main():
+    # Set environment variables
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    os.environ["KERAS_BACKEND"] = "jax"
+    import absl.logging
+    absl.logging.set_verbosity(absl.logging.ERROR)
+
+
     parser = argparse.ArgumentParser(description='Possum disease classification pipeline')
     parser.add_argument('--stage', type=int, default=0, 
                         help='Start from specific stage (0=all, 1=wildlife, 2=possum, 3=pseudo)')
