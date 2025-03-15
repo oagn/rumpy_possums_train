@@ -77,7 +77,7 @@ def train_wildlife_model(config, strategy):
     # Progressively fine-tune the model
     prog_hists, model, best_model_fpath = fit_progressive(
         config, model,
-        train_df=prog_train,
+        prog_train=prog_train,
         val_df=val_df,
         output_fpath=output_fpath,
         img_size=img_size
@@ -196,9 +196,9 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
         print(f"  Class {class_name}: weight = {class_weights[idx]:.2f}")
     
     # Pass class counts to the progressive training function
-    prog_hists, model, best_model_fpath = fit_progressive_balanced(
+    prog_hists, model, best_model_fpath = fit_progressive(
         possum_config, model,
-        train_df=prog_train,
+        prog_train=prog_train,
         val_df=val_df,
         output_fpath=output_fpath,
         img_size=img_size,
@@ -313,7 +313,7 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     # Progressively fine-tune the model
     prog_hists, model, best_model_fpath = fit_progressive(
         pseudo_config, model,
-        train_df=prog_train,
+        prog_train=prog_train,
         val_df=val_df,
         output_fpath=output_fpath,
         img_size=img_size
