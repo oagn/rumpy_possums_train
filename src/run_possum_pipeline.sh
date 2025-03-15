@@ -36,7 +36,14 @@ rm -rf ${WDPATH}
 mkdir -p ${WDPATH}
 cd ${WDPATH}
 
-cp ${input_dir}/* ${WDPATH}
+# Copy only the src folder and its contents
+echo "Copying src folder from ${input_dir} to ${WDPATH}"
+mkdir -p ${WDPATH}/src
+cp -r ${input_dir}/src/* ${WDPATH}/src/
+
+# List the contents to verify
+echo "Contents of src directory:"
+ls -la ${WDPATH}/src
 
 # Setup environment
 module purge
