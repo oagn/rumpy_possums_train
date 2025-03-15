@@ -6,7 +6,7 @@
 #SBATCH --time=05:00:00
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --mem=148g
 #SBATCH --account=scw1985
 
@@ -57,6 +57,8 @@ export KERAS_BACKEND=jax
 export TF_XLA_FLAGS="--tf_xla_enable_xla_devices=false"
 export TF_FORCE_GPU_ALLOW_GROWTH=true
 export XLA_FLAGS="--xla_gpu_cuda_data_dir=/apps/languages/cuda/11.7.0"
+# Limit JAX to use only one GPU
+export CUDA_VISIBLE_DEVICES=0
 
 # Run the pipeline
 # Use command line arguments to specify stages if needed:
