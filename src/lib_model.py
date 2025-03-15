@@ -209,7 +209,7 @@ def fit_frozen(config, model, train_df, val_df, num_classes, df_size, img_size):
     return(hist, model)  
         
 # Fine-tunes the model progressively with blocks unfrozen and increasing regularisation
-def fit_progressive(config, model, train_df, val_df, output_fpath, img_size): 
+def fit_progressive(config, model, prog_train, val_df, output_fpath, img_size): 
     if model._compile_loss is None:
         print(">>> Error: Model NOT compiled.")
         sys.exit(1)
@@ -222,14 +222,10 @@ def fit_progressive(config, model, train_df, val_df, output_fpath, img_size):
     best_model_fpath = os.path.join(output_fpath, config['SAVEFILE']+'_'+config['MODEL']+'.keras')
     val_ds = create_tensorset(val_df, img_size, batch_size=config['BATCH_SIZE'])
     
-    # Create datasets for progressive training
-    print('\nCreating datasets for progressive training...')
-    prog_train = []
-    for i in range(total_epochs):
-        # Create a new training dataset with a different random seed for each epoch
-        # This provides data diversity during training
-        train_tmp = train_df.sample(frac=1, random_state=config['SEED']+i).reset_index(drop=True)
-        prog_train.append(train_tmp)
+    # Verify that we have enough training datasets for all epochs
+    if len(prog_train) < total_epochs:
+        print(f"Warning: Only {len(prog_train)} training datasets provided for {total_epochs} epochs.")
+        print("Using available datasets in a cyclic manner.")
     
     for stage, dropout, magnitude in zip(range(stages), config['DROPOUTS'], config['MAGNITUDES']):
         if stage == 0:
@@ -245,7 +241,9 @@ def fit_progressive(config, model, train_df, val_df, output_fpath, img_size):
                 if isinstance(model.layers[layer_index], layers.Dropout):
                     model.layers[layer_index].rate = dropout 
         for i in seq:
-            train_ds = create_tensorset(prog_train[i], img_size, batch_size=config['BATCH_SIZE'], 
+            # Use modulo to cycle through available datasets if needed
+            dataset_index = i % len(prog_train)
+            train_ds = create_tensorset(prog_train[dataset_index], img_size, batch_size=config['BATCH_SIZE'], 
                                         magnitude=magnitude, n_augments=config['NUM_AUG'], ds_name="train")            
             history = model.fit(train_ds, initial_epoch=i, epochs=(i+1), validation_data=val_ds) 
             histories.append(history)
