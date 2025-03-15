@@ -30,13 +30,13 @@ echo Number of mpiprocs per node is $PPN
 env
 
 # Setup working directory
-input_dir=$HOME/workarea/rumpy_possums_train
+input_dir=$HOME/workarea/rumpy_possums_train/
 WDPATH=/scratch/$USER/possum_pipeline.$SLURM_JOBID
 rm -rf ${WDPATH}
 mkdir -p ${WDPATH}
 cd ${WDPATH}
 
-cp ${input_dir}/*.py ${WDPATH}
+cp ${input_dir}/* ${WDPATH}
 
 # Setup environment
 module purge
