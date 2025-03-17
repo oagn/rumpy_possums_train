@@ -21,9 +21,14 @@ def train_wildlife_model(config, strategy):
     """Train the initial model on wildlife data (9 classes)"""
     print("\n===== STAGE 1: Training initial wildlife model =====")
     
-    # Setup paths
-    output_fpath = os.path.join(config['OUTPUT_PATH'], config['SAVEFILE'], config['MODEL'])
+    # Setup paths with wildlife-specific name
+    wildlife_savefile = f"{config['SAVEFILE']}_wildlife"
+    output_fpath = os.path.join(config['OUTPUT_PATH'], wildlife_savefile, config['MODEL'])
     ensure_output_directory(output_fpath)
+    
+    # Create a modified config with the wildlife-specific savefile
+    wildlife_config = config.copy()
+    wildlife_config['SAVEFILE'] = wildlife_savefile
     
     # Validate directory structure
     validate_directory_structure(config['TRAIN_PATH'], config['VAL_PATH'], config['TEST_PATH'])
@@ -87,7 +92,7 @@ def train_wildlife_model(config, strategy):
     history_path = save_training_history(
         prog_hists, 
         output_fpath, 
-        f"{config['SAVEFILE']}_{config['MODEL']}_wildlife"
+        f"{wildlife_savefile}_{config['MODEL']}_wildlife"
     )
     print(f"Wildlife model training history saved to: {history_path}")
     
@@ -107,19 +112,23 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     """Fine-tune the wildlife model on possum disease data"""
     print("\n===== STAGE 2: Fine-tuning on possum disease data =====")
     
+    # Setup paths with finetuned-specific name
+    finetuned_savefile = f"{config['SAVEFILE']}_finetuned"
+    output_fpath = os.path.join(config['OUTPUT_PATH'], finetuned_savefile, config['MODEL'])
+    ensure_output_directory(output_fpath)
+    
+    # Create a modified config with the finetuned-specific savefile
+    finetuned_config = config.copy()
+    finetuned_config['SAVEFILE'] = finetuned_savefile
+    
     # Update paths for possum data
     possum_config = config.copy()
     possum_config['TRAIN_PATH'] = config['POSSUM_TRAIN_PATH']
     possum_config['VAL_PATH'] = config['POSSUM_VAL_PATH']
     possum_config['TEST_PATH'] = config['POSSUM_TEST_PATH']
-    possum_config['SAVEFILE'] = config['SAVEFILE'] + '_possum'
     
     # Set up class weighting to handle imbalance
     possum_config['USE_CLASS_WEIGHTS'] = True
-    
-    # Setup output path
-    output_fpath = os.path.join(config['OUTPUT_PATH'], possum_config['SAVEFILE'], config['MODEL'])
-    ensure_output_directory(output_fpath)
     
     # Validate directory structure
     validate_directory_structure(possum_config['TRAIN_PATH'], possum_config['VAL_PATH'], possum_config['TEST_PATH'])
