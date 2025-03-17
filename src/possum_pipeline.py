@@ -431,6 +431,14 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
         img_size=img_size
     )
     
+    # Save training history
+    history_path = save_training_history(
+        prog_hists, 
+        output_fpath, 
+        f"{pseudo_config['SAVEFILE']}_{config['MODEL']}"
+    )
+    print(f"Pseudo trained model training history saved to: {history_path}")
+
     # Evaluate on possum test set
     calc_class_metrics(
         model_fpath=best_model_fpath,

@@ -21,7 +21,7 @@ POSSUM_VAL_PATH: '/scratch/c.c1767198/data/possums/near_dupe_sorted/validate'
 UNLABELED_POSSUM_PATH: '/scratch/c.c1767198/data/possums/unlabeled_possums'
 
 # Pseudo-labeling settings
-PSEUDO_LABEL_CONFIDENCE: 0.7 # Minimum confidence threshold for accepting pseudo-labels
+PSEUDO_LABEL_CONFIDENCE: 0.8 # Minimum confidence threshold for accepting pseudo-labels
 
 # Training hyperparameters
 OPTIMIZER: 'adamw' 
@@ -31,11 +31,11 @@ LEARNING_RATE: 1e-4
 BATCH_SIZE: 16
 NUM_AUG: 3
 
-FROZ_EPOCH: 1 # Number of epochs to train the frozen model
+FROZ_EPOCH: 10 # Number of epochs to train the frozen model
 
 BUF: 1 # Blocks to unfreeze for fine-tuning 
-PROG_STAGE_LEN: 1  # Number of progressive fine-tuning epochs 
-PROG_TOT_EPOCH: 1 # Total number of epochs required
+PROG_STAGE_LEN: 7  # Number of progressive fine-tuning epochs 
+PROG_TOT_EPOCH: 30 # Total number of epochs required
 
 # Regularisation/augmentation progression
 MAGNITUDES:
