@@ -17,7 +17,7 @@ def load_img(file_path, img_size):
     img = tf.image.resize(img, size=(img_size, img_size))
     return img
 
-def generate_pseudo_labels(model_path, unlabeled_dir, output_dir, classes, confidence_threshold=0.7, img_size=384, batch_size=32):
+def generate_pseudo_labels(model_path, unlabeled_dir, output_dir, classes, confidence_threshold=0.7, img_size=384, batch_size=32, custom_objects=None):
     """
     Generate pseudo-labels for unlabeled data using a trained model
     
@@ -29,6 +29,7 @@ def generate_pseudo_labels(model_path, unlabeled_dir, output_dir, classes, confi
         confidence_threshold: Minimum confidence to accept a prediction
         img_size: Image size required by the model
         batch_size: Batch size for prediction
+        custom_objects: Dictionary of custom objects for model loading
         
     Returns:
         DataFrame containing pseudo-labeled data information
@@ -38,7 +39,25 @@ def generate_pseudo_labels(model_path, unlabeled_dir, output_dir, classes, confi
     print(f"Confidence threshold: {confidence_threshold}")
     
     # Load the model
-    model = models.load_model(model_path, compile=False)
+    try:
+        # Try to load the model with custom objects
+        from keras import models
+        model = models.load_model(model_path, custom_objects=custom_objects, compile=False)
+        print("Model loaded successfully with custom objects")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        print("Attempting alternative loading approach...")
+        
+        try:
+            # Try using TensorFlow's keras instead
+            import tensorflow as tf
+            model = tf.keras.models.load_model(model_path, compile=False)
+            print("Model loaded successfully using TensorFlow Keras")
+        except Exception as e2:
+            print(f"TensorFlow loading also failed: {e2}")
+            print("WARNING: Unable to load the model. Cannot generate pseudo-labels.")
+            return None
+    
     model.trainable = False  # Set to inference mode
     
     # Get all image files from the unlabeled directory

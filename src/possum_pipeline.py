@@ -9,6 +9,8 @@ import tensorflow as tf
 from pathlib import Path
 import argparse
 from keras import models
+# Import necessary modules for custom objects
+import kimm
 
 # Import custom modules
 from lib_model import build_classifier, fit_frozen, fit_progressive, calc_class_metrics, unfreeze_model, save_training_history
@@ -126,6 +128,7 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     possum_config['TRAIN_PATH'] = config['POSSUM_TRAIN_PATH']
     possum_config['VAL_PATH'] = config['POSSUM_VAL_PATH']
     possum_config['TEST_PATH'] = config['POSSUM_TEST_PATH']
+    possum_config['SAVEFILE'] = finetuned_savefile
     
     # Set up class weighting to handle imbalance
     possum_config['USE_CLASS_WEIGHTS'] = True
@@ -157,10 +160,49 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     val_df = create_fixed(possum_config['VAL_PATH'])
     print_dsinfo(val_df, 'Validation Data')
     
-    # Load pre-trained wildlife model
+    # Load pre-trained wildlife model with custom objects
     print(f"\nLoading pre-trained wildlife model from {wildlife_model_path}")
+    
+    # Define custom_objects dictionary to help with model loading
+    custom_objects = {
+        'EfficientNetV2S': kimm.models.EfficientNetV2S,
+        'EfficientNetV2B0': kimm.models.EfficientNetV2B0,
+        'EfficientNetV2B2': kimm.models.EfficientNetV2B2,
+        'EfficientNetV2M': kimm.models.EfficientNetV2M,
+        'EfficientNetV2L': kimm.models.EfficientNetV2L,
+        'EfficientNetV2XL': kimm.models.EfficientNetV2XL,
+        'ConvNeXtPico': kimm.models.ConvNeXtPico,
+        'ConvNeXtNano': kimm.models.ConvNeXtNano,
+        'ConvNeXtTiny': kimm.models.ConvNeXtTiny,
+        'ConvNeXtSmall': kimm.models.ConvNeXtSmall,
+        'ConvNeXtBase': kimm.models.ConvNeXtBase,
+        'ConvNeXtLarge': kimm.models.ConvNeXtLarge,
+        'VisionTransformerTiny16': kimm.models.VisionTransformerTiny16,
+        'VisionTransformerSmall16': kimm.models.VisionTransformerSmall16,
+        'VisionTransformerBase16': kimm.models.VisionTransformerBase16,
+        'VisionTransformerLarge16': kimm.models.VisionTransformerLarge16
+    }
+    
     with strategy.scope():
-        wildlife_model = models.load_model(wildlife_model_path, compile=False)
+        try:
+            # Try to load the model with custom objects
+            wildlife_model = models.load_model(wildlife_model_path, custom_objects=custom_objects, compile=False)
+            print("Wildlife model loaded successfully with custom objects")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            print("Attempting alternative loading approach...")
+            
+            try:
+                # Try using TensorFlow's keras instead
+                wildlife_model = tf.keras.models.load_model(wildlife_model_path, compile=False)
+                print("Wildlife model loaded successfully using TensorFlow Keras")
+            except Exception as e2:
+                print(f"TensorFlow loading also failed: {e2}")
+                print("WARNING: Unable to load the wildlife model. Will rebuild from scratch.")
+                
+                # Rebuild the model from scratch as a last resort
+                wildlife_model = build_classifier(config, 9, 1000, img_size)  # 9 classes for wildlife
+                print("Rebuilt wildlife model from scratch (untrained)")
         
         # Modify the model to have the correct number of classes for possum disease
         wildlife_model.pop()  # Remove the last classification layer
@@ -204,15 +246,18 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     for class_name, idx in class_map.items():
         print(f"  Class {class_name}: weight = {class_weights[idx]:.2f}")
     
-    # Pass class counts to the progressive training function
+    # Pass class weights to the progressive training function
     prog_hists, model, best_model_fpath = fit_progressive(
-        possum_config, model,
-        prog_train=prog_train,
-        val_df=val_df,
-        output_fpath=output_fpath,
-        img_size=img_size,
-        class_counts=class_counts
+        possum_config, model, prog_train, val_df, output_fpath, img_size
     )
+    
+    # Save training history
+    history_path = save_training_history(
+        prog_hists, 
+        output_fpath, 
+        f"{finetuned_savefile}_{config['MODEL']}"
+    )
+    print(f"Finetuned model training history saved to: {history_path}")
     
     # Evaluate on possum test set
     calc_class_metrics(
@@ -233,7 +278,7 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     # Define paths for this stage
     pseudo_config = config.copy()
     pseudo_config['TRAIN_PATH'] = config['POSSUM_TRAIN_PATH']
-    pseudo_config['VAL_PATH'] = config['POSSUM_VAL_PATH'] 
+    pseudo_config['VAL_PATH'] = config['POSSUM_VAL_PATH']
     pseudo_config['TEST_PATH'] = config['POSSUM_TEST_PATH']
     pseudo_config['SAVEFILE'] = config['SAVEFILE'] + '_pseudo'
     
@@ -241,19 +286,60 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     output_fpath = os.path.join(config['OUTPUT_PATH'], pseudo_config['SAVEFILE'], config['MODEL'])
     ensure_output_directory(output_fpath)
     
+    # Define custom_objects dictionary to help with model loading
+    custom_objects = {
+        'EfficientNetV2S': kimm.models.EfficientNetV2S,
+        'EfficientNetV2B0': kimm.models.EfficientNetV2B0,
+        'EfficientNetV2B2': kimm.models.EfficientNetV2B2,
+        'EfficientNetV2M': kimm.models.EfficientNetV2M,
+        'EfficientNetV2L': kimm.models.EfficientNetV2L,
+        'EfficientNetV2XL': kimm.models.EfficientNetV2XL,
+        'ConvNeXtPico': kimm.models.ConvNeXtPico,
+        'ConvNeXtNano': kimm.models.ConvNeXtNano,
+        'ConvNeXtTiny': kimm.models.ConvNeXtTiny,
+        'ConvNeXtSmall': kimm.models.ConvNeXtSmall,
+        'ConvNeXtBase': kimm.models.ConvNeXtBase,
+        'ConvNeXtLarge': kimm.models.ConvNeXtLarge,
+        'VisionTransformerTiny16': kimm.models.VisionTransformerTiny16,
+        'VisionTransformerSmall16': kimm.models.VisionTransformerSmall16,
+        'VisionTransformerBase16': kimm.models.VisionTransformerBase16,
+        'VisionTransformerLarge16': kimm.models.VisionTransformerLarge16
+    }
+    
     # Generate pseudo-labels for unlabeled data
     unlabeled_path = config['UNLABELED_POSSUM_PATH']
     pseudo_labeled_path = os.path.join(config['OUTPUT_PATH'], 'pseudo_labeled')
     ensure_output_directory(pseudo_labeled_path)
     
     confidence_threshold = float(config.get('PSEUDO_LABEL_CONFIDENCE', 0.7))
+    
+    # Load the possum model with custom objects
+    print(f"\nLoading fine-tuned possum model from {possum_model_path}")
+    try:
+        # Try to load the model with custom objects
+        possum_model = models.load_model(possum_model_path, custom_objects=custom_objects, compile=False)
+        print("Possum model loaded successfully with custom objects")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        print("Attempting alternative loading approach...")
+        
+        try:
+            # Try using TensorFlow's keras instead
+            possum_model = tf.keras.models.load_model(possum_model_path, compile=False)
+            print("Possum model loaded successfully using TensorFlow Keras")
+        except Exception as e2:
+            print(f"TensorFlow loading also failed: {e2}")
+            print("WARNING: Unable to load the possum model. Cannot proceed with pseudo-labeling.")
+            return None
+    
     pseudo_df = generate_pseudo_labels(
         model_path=possum_model_path,
         unlabeled_dir=unlabeled_path,
         output_dir=pseudo_labeled_path,
         classes=possum_classes,
         confidence_threshold=confidence_threshold,
-        img_size=img_size
+        img_size=img_size,
+        custom_objects=custom_objects
     )
     
     print("\n===== STAGE 4: Training on combined labeled + pseudo-labeled data =====")
@@ -300,7 +386,24 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     # Load fine-tuned possum model
     print(f"\nLoading fine-tuned possum model from {possum_model_path}")
     with strategy.scope():
-        model = models.load_model(possum_model_path, compile=False)
+        try:
+            # Try to load the model with custom objects
+            model = models.load_model(possum_model_path, custom_objects=custom_objects, compile=False)
+            print("Possum model loaded successfully with custom objects")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            print("Attempting alternative loading approach...")
+            
+            try:
+                # Try using TensorFlow's keras instead
+                import tensorflow as tf
+                model = tf.keras.models.load_model(possum_model_path, compile=False)
+                print("Possum model loaded successfully using TensorFlow Keras")
+            except Exception as e2:
+                print(f"TensorFlow loading also failed: {e2}")
+                print("WARNING: Unable to load the possum model. Cannot proceed with training.")
+                return None
+        
         # Unfreeze for fine-tuning on combined data
         model = unfreeze_model(pseudo_config, model, num_classes, df_size)
     
