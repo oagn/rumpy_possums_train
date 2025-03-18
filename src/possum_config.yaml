@@ -54,9 +54,9 @@ CLASS_SAMPLES_DEFAULT: 4000
 
 # For possum disease classes, we specify more samples for each class
 CLASS_SAMPLES_SPECIFIC:
-  - SAMPLES: 3177  # Use all available data
+  - SAMPLES: 1300  # Use all available data
     CLASS: "0"     # healthy
-  - SAMPLES: 1329  # Use all available data 
+  - SAMPLES: 1300  # Use all available data 
     CLASS: "12"    # visible signs of disease
-  - SAMPLES: 1619  # Use all available data
+  - SAMPLES: 1300  # Use all available data
     CLASS: "99"    # occluded
