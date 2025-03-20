@@ -488,10 +488,31 @@ def main():
         possum_model_path, possum_classes, _ = finetune_on_possum(config, wildlife_model_path, img_size, strategy)
     else:
         # Load possum classes from the existing model's class map
-        possum_output_path = os.path.join(config['OUTPUT_PATH'], config['SAVEFILE'] + '_possum', config['MODEL'])
-        with open(os.path.join(possum_output_path, config['SAVEFILE'] + '_possum_class_map.yaml'), 'r') as file:
-            class_map = yaml.safe_load(file)
-        possum_classes = list(class_map.keys())
+        # Extract model directory from the model path
+        possum_model_dir = os.path.dirname(possum_model_path)
+        
+        # Look for class map file in the same directory as the model
+        possible_class_maps = [
+            os.path.join(possum_model_dir, f"{config['SAVEFILE']}_finetuned_class_map.yaml"),
+            os.path.join(possum_model_dir, f"{config['SAVEFILE']}_possum_class_map.yaml"),
+            # Add more possible patterns if needed
+        ]
+        
+        # Try each possible class map path
+        class_map_found = False
+        for class_map_path in possible_class_maps:
+            if os.path.exists(class_map_path):
+                print(f"Found class map at: {class_map_path}")
+                with open(class_map_path, 'r') as file:
+                    class_map = yaml.safe_load(file)
+                possum_classes = list(class_map.keys())
+                class_map_found = True
+                break
+        
+        if not class_map_found:
+            raise FileNotFoundError(f"Could not find class map file in {possum_model_dir}. "
+                                   f"Tried paths: {possible_class_maps}")
+        
         print(f"\nSkipping Stage 2. Using possum model: {possum_model_path}")
     
     if start_stage <= 3:
