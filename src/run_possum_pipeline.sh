@@ -67,7 +67,7 @@ export CUDA_VISIBLE_DEVICES=0
 # --stage 2: Start from possum fine-tuning (requires --wildlife_model)
 # --stage 3: Start from pseudo-labeling (requires --possum_model)
 # Define path to pre-trained possum model
-POSSUM_MODEL="/scratch/c.c1767198/output/rumpy_possum_train/possum_disease_finetuned/ENS/best_model.keras"
+POSSUM_MODEL="/scratch/c.c1767198/output/rumpy_possum_train/possum_disease_finetuned/ENS/possum_disease_finetuned.keras"
 
 # Run the pipeline starting from stage 3 (pseudo-labeling)
 start="$(date +%s)"
