@@ -313,26 +313,8 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     
     confidence_threshold = float(config.get('PSEUDO_LABEL_CONFIDENCE', 0.7))
     
-    # Load the possum model with custom objects
-    print(f"\nLoading fine-tuned possum model from {possum_model_path}")
-    try:
-        # Try to load the model with custom objects
-        possum_model = models.load_model(possum_model_path, custom_objects=custom_objects, compile=False)
-        print("Possum model loaded successfully with custom objects")
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        print("Attempting alternative loading approach...")
-        
-        try:
-            # Try using TensorFlow's keras instead
-            possum_model = tf.keras.models.load_model(possum_model_path, compile=False)
-            print("Possum model loaded successfully using TensorFlow Keras")
-        except Exception as e2:
-            print(f"TensorFlow loading also failed: {e2}")
-            print("WARNING: Unable to load the possum model. Cannot proceed with pseudo-labeling.")
-            return None
-    
-    pseudo_df = generate_pseudo_labels(
+    # Load the possum model
+    csv_path = generate_pseudo_labels(
         model_path=possum_model_path,
         unlabeled_dir=unlabeled_path,
         output_dir=pseudo_labeled_path,
@@ -342,17 +324,20 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
         custom_objects=custom_objects
     )
     
+    if csv_path is None:
+        print("No pseudo-labels generated. Cannot proceed with Stage 4.")
+        return None
+    
     print("\n===== STAGE 4: Training on combined labeled + pseudo-labeled data =====")
     
     # Combine original labeled data with pseudo-labeled data
     combined_train_path = os.path.join(config['OUTPUT_PATH'], 'combined_train')
-    ensure_output_directory(combined_train_path)
     pseudo_config['TRAIN_PATH'] = combined_train_path
     
-    # Create combined dataset
+    # Create combined dataset using the CSV file instead of copying files again
     combine_datasets(
         original_train_path=config['POSSUM_TRAIN_PATH'],
-        pseudo_labeled_path=pseudo_labeled_path,
+        pseudo_labeled_csv_path=csv_path,
         output_path=combined_train_path
     )
     
