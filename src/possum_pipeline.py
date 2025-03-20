@@ -282,6 +282,15 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     pseudo_config['TEST_PATH'] = config['POSSUM_TEST_PATH']
     pseudo_config['SAVEFILE'] = config['SAVEFILE'] + '_pseudo'
     
+    # Explicitly remove CLASS_SAMPLES_SPECIFIC to force using CLASS_SAMPLES_DEFAULT only
+    if 'CLASS_SAMPLES_SPECIFIC' in pseudo_config:
+        print(f"Removing class-specific sample settings for pseudo-label training")
+        del pseudo_config['CLASS_SAMPLES_SPECIFIC']
+    
+    # Get CLASS_SAMPLES_DEFAULT directly from the config
+    default_samples = pseudo_config['CLASS_SAMPLES_DEFAULT']
+    print(f"Using CLASS_SAMPLES_DEFAULT: {default_samples} for pseudo-label training")
+    
     # Setup output path
     output_fpath = os.path.join(config['OUTPUT_PATH'], pseudo_config['SAVEFILE'], config['MODEL'])
     ensure_output_directory(output_fpath)

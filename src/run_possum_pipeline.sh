@@ -66,9 +66,12 @@ export CUDA_VISIBLE_DEVICES=0
 # --stage 1: Start from wildlife model training
 # --stage 2: Start from possum fine-tuning (requires --wildlife_model)
 # --stage 3: Start from pseudo-labeling (requires --possum_model)
+# Define path to pre-trained possum model
+POSSUM_MODEL="/scratch/c.c1767198/output/rumpy_possum_train/possum_disease_finetuned/ENS/best_model.keras"
 
+# Run the pipeline starting from stage 3 (pseudo-labeling)
 start="$(date +%s)"
-time conda run -n keras-jax python src/possum_pipeline.py --config src/possum_config.yaml
+time conda run -n keras-jax python src/possum_pipeline.py --config src/possum_config.yaml --stage 3 --possum_model ${POSSUM_MODEL}
 stop="$(date +%s)"
 finish=$(( $stop-$start ))
 echo Possum pipeline $SLURM_JOBID Job-Time $finish seconds
