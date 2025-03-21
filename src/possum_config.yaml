@@ -21,7 +21,7 @@ POSSUM_VAL_PATH: '/scratch/c.c1767198/data/possums/near_dupe_sorted/validate'
 UNLABELED_POSSUM_PATH: '/scratch/c.c1767198/data/possums/unlabeled_possums'
 
 # Pseudo-labeling settings
-PSEUDO_LABEL_CONFIDENCE: 0.8 # Minimum confidence threshold for accepting pseudo-labels
+PSEUDO_LABEL_CONFIDENCE: 0.95 # Minimum confidence threshold for accepting pseudo-labels
 
 # Training hyperparameters
 OPTIMIZER: 'adamw' 
@@ -35,7 +35,7 @@ FROZ_EPOCH: 10 # Number of epochs to train the frozen model
 
 BUF: 1 # Blocks to unfreeze for fine-tuning 
 PROG_STAGE_LEN: 7  # Number of progressive fine-tuning epochs 
-PROG_TOT_EPOCH: 30 # Total number of epochs required
+PROG_TOT_EPOCH: 15 # Total number of epochs required
 
 # Regularisation/augmentation progression
 MAGNITUDES:
@@ -50,7 +50,7 @@ DROPOUTS:
   - 0.4
 
 # Class samples settings
-CLASS_SAMPLES_DEFAULT: 4000
+CLASS_SAMPLES_DEFAULT: 2000
 
 # For possum disease classes, we specify more samples for each class
 CLASS_SAMPLES_SPECIFIC:
