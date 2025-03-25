@@ -185,9 +185,14 @@ def combine_datasets(original_train_path, pseudo_labeled_csv_path, output_path):
         
         # Process each pseudo-labeled image
         copied_count = 0
+        class_counts = {}
+        
+        # Convert all labels to strings (fixes the int join error)
+        pseudo_df['Label'] = pseudo_df['Label'].astype(str)
+        
         for idx, row in pseudo_df.iterrows():
             source_file = row['File']
-            label = row['Label']
+            label = str(row['Label'])  # Ensure label is a string
             confidence = row['Confidence']
             
             # Ensure label directory exists
@@ -202,13 +207,25 @@ def combine_datasets(original_train_path, pseudo_labeled_csv_path, output_path):
             if os.path.exists(source_file):
                 shutil.copy2(source_file, dst_file)
                 copied_count += 1
+                
+                # Track counts per class
+                class_counts[label] = class_counts.get(label, 0) + 1
             else:
                 print(f"Warning: Source file not found: {source_file}")
+                
+            # Print progress periodically
+            if (idx + 1) % 1000 == 0:
+                print(f"  Processed {idx + 1}/{len(pseudo_df)} pseudo-labeled images...")
         
         print(f"Added {copied_count} pseudo-labeled images to the combined dataset")
+        print("Pseudo-labeled class distribution:")
+        for label, count in class_counts.items():
+            print(f"  Class {label}: {count} added")
         
     except Exception as e:
+        import traceback
         print(f"Error processing pseudo-label CSV: {e}")
+        traceback.print_exc()
     
     # Count files in combined dataset
     total_files = 0
