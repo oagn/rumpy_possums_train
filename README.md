@@ -1,3 +1,5 @@
+Based on https://github.com/zaandahl/mewc-train
+
 # Possum Disease Classification Pipeline
 
 This repository contains a multi-stage pipeline for possum disease classification using transfer learning and pseudo-labeling techniques.
