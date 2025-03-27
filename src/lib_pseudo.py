@@ -241,4 +241,71 @@ def combine_datasets(original_train_path, pseudo_labeled_csv_path, output_path):
     print(f"Total files: {total_files}")
     print("Class distribution:")
     for class_name, count in class_counts.items():
-        print(f"  {class_name}: {count} files") 
+        print(f"  {class_name}: {count} files")
+
+# Add this new function for curriculum-based dataset creation
+def create_curriculum_datasets(original_train_path, pseudo_labeled_csv_path, output_base_path, num_stages=4, min_confidence=0.7):
+    """
+    Create a series of datasets for curriculum learning with progressively more pseudo-labels
+    
+    Args:
+        original_train_path: Path to original labeled training data
+        pseudo_labeled_csv_path: Path to CSV file containing pseudo-label information
+        output_base_path: Base path to save the curriculum datasets
+        num_stages: Number of curriculum stages
+        min_confidence: Minimum confidence threshold for including any pseudo-label
+        
+    Returns:
+        List of paths to the curriculum datasets
+    """
+    print(f"Creating curriculum datasets for pseudo-label training")
+    
+    # Make sure the base output directory exists
+    os.makedirs(output_base_path, exist_ok=True)
+    
+    # Load the pseudo-labeled data
+    import pandas as pd
+    pseudo_df = pd.read_csv(pseudo_labeled_csv_path)
+    
+    # Verify CSV structure
+    required_columns = ['File', 'Label', 'Confidence']
+    if not all(col in pseudo_df.columns for col in required_columns):
+        raise ValueError(f"CSV file does not contain required columns: {required_columns}")
+    
+    # Convert all labels to strings
+    pseudo_df['Label'] = pseudo_df['Label'].astype(str)
+    
+    # Filter by minimum confidence
+    pseudo_df = pseudo_df[pseudo_df['Confidence'] >= min_confidence]
+    if len(pseudo_df) == 0:
+        raise ValueError(f"No pseudo-labels with confidence >= {min_confidence}")
+    
+    # Sort by confidence (highest first)
+    pseudo_df = pseudo_df.sort_values(by='Confidence', ascending=False)
+    
+    # Calculate the number of samples to include in each stage
+    total_samples = len(pseudo_df)
+    samples_per_stage = [int(total_samples * (i+1) / num_stages) for i in range(num_stages)]
+    print(f"Total pseudo-labeled samples: {total_samples}")
+    print(f"Samples per curriculum stage: {samples_per_stage}")
+    
+    # Create datasets for each curriculum stage
+    curriculum_paths = []
+    for stage, num_samples in enumerate(samples_per_stage):
+        stage_path = os.path.join(output_base_path, f"stage_{stage+1}")
+        os.makedirs(stage_path, exist_ok=True)
+        
+        # Select the top N samples for this stage
+        stage_df = pseudo_df.iloc[:num_samples]
+        min_conf_in_stage = stage_df['Confidence'].min()
+        print(f"Stage {stage+1}: Using {num_samples} samples with confidence >= {min_conf_in_stage:.4f}")
+        
+        # Create a temporary CSV for this stage
+        stage_csv_path = os.path.join(stage_path, f"pseudo_labels_stage_{stage+1}.csv")
+        stage_df.to_csv(stage_csv_path, index=False)
+        
+        # Combine original data with this stage's pseudo-labels
+        combine_datasets(original_train_path, stage_csv_path, stage_path)
+        curriculum_paths.append(stage_path)
+    
+    return curriculum_paths 

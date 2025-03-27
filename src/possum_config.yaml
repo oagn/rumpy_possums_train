@@ -60,3 +60,8 @@ CLASS_SAMPLES_SPECIFIC:
     CLASS: "12"    # visible signs of disease
   - SAMPLES: 1300  # Use all available data
     CLASS: "99"    # occluded
+
+# Add these curriculum learning parameters
+USE_CURRICULUM: true
+CURRICULUM_STAGES: 4  # Number of curriculum stages
+PSEUDO_LABEL_MIN_CONFIDENCE: 0.7  # Minimum confidence threshold for any pseudo-label

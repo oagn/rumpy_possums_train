@@ -15,7 +15,7 @@ import kimm
 # Import custom modules
 from lib_model import build_classifier, fit_frozen, fit_progressive, calc_class_metrics, unfreeze_model, save_training_history
 from lib_data import print_dsinfo, create_train, create_fixed, process_samples_from_config, ensure_output_directory, validate_directory_structure
-from lib_pseudo import generate_pseudo_labels, combine_datasets
+from lib_pseudo import generate_pseudo_labels, combine_datasets, create_curriculum_datasets
 from lib_common import update_config_from_env, model_img_size_mapping, read_yaml, setup_strategy
 
 
@@ -271,8 +271,8 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     
     return best_model_fpath, classes, img_size
 
-def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_classes, img_size, strategy):
-    """Generate pseudo-labels for unlabeled possum data and train on combined dataset"""
+def generate_and_train_with_pseudo_labels_curriculum(config, possum_model_path, possum_classes, img_size, strategy):
+    """Generate pseudo-labels for unlabeled data and train using curriculum learning"""
     print("\n===== STAGE 3: Generating pseudo-labels for unlabeled data =====")
     
     # Define paths for this stage
@@ -280,7 +280,7 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     pseudo_config['TRAIN_PATH'] = config['POSSUM_TRAIN_PATH']
     pseudo_config['VAL_PATH'] = config['POSSUM_VAL_PATH']
     pseudo_config['TEST_PATH'] = config['POSSUM_TEST_PATH']
-    pseudo_config['SAVEFILE'] = config['SAVEFILE'] + '_pseudo'
+    pseudo_config['SAVEFILE'] = config['SAVEFILE'] + '_pseudo_curriculum'
     
     # Explicitly remove CLASS_SAMPLES_SPECIFIC to force using CLASS_SAMPLES_DEFAULT only
     if 'CLASS_SAMPLES_SPECIFIC' in pseudo_config:
@@ -320,15 +320,18 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     pseudo_labeled_path = os.path.join(config['OUTPUT_PATH'], 'pseudo_labeled')
     ensure_output_directory(pseudo_labeled_path)
     
-    confidence_threshold = float(config.get('PSEUDO_LABEL_CONFIDENCE', 0.7))
+    # Use a lower confidence threshold for initial pseudo-labeling 
+    # (we'll filter by confidence during curriculum stages)
+    min_confidence = 0.7  # Minimum confidence for any pseudo-label
+    max_confidence = float(config.get('PSEUDO_LABEL_CONFIDENCE', 0.99))  # Max confidence threshold
     
-    # Load the possum model
+    # Load the possum model and generate pseudo-labels
     csv_path = generate_pseudo_labels(
         model_path=possum_model_path,
         unlabeled_dir=unlabeled_path,
         output_dir=pseudo_labeled_path,
         classes=possum_classes,
-        confidence_threshold=confidence_threshold,
+        confidence_threshold=min_confidence,  # Use lower threshold initially
         img_size=img_size,
         custom_objects=custom_objects
     )
@@ -337,41 +340,23 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
         print("No pseudo-labels generated. Cannot proceed with Stage 4.")
         return None
     
-    print("\n===== STAGE 4: Training on combined labeled + pseudo-labeled data =====")
+    print("\n===== STAGE 4: Training with curriculum learning on pseudo-labels =====")
     
-    # Combine original labeled data with pseudo-labeled data
-    combined_train_path = os.path.join(config['OUTPUT_PATH'], 'combined_train')
-    pseudo_config['TRAIN_PATH'] = combined_train_path
+    # Create curriculum datasets with progressively more pseudo-labels
+    curriculum_base_path = os.path.join(config['OUTPUT_PATH'], 'curriculum_datasets')
+    num_curriculum_stages = pseudo_config.get('CURRICULUM_STAGES', 4)  # Default to 4 stages
     
-    # Create combined dataset using the CSV file instead of copying files again
-    combine_datasets(
+    curriculum_paths = create_curriculum_datasets(
         original_train_path=config['POSSUM_TRAIN_PATH'],
         pseudo_labeled_csv_path=csv_path,
-        output_path=combined_train_path
+        output_base_path=curriculum_base_path,
+        num_stages=num_curriculum_stages,
+        min_confidence=min_confidence
     )
     
-    # Validate directory structure
+    # Validate directory structure for the first stage
+    pseudo_config['TRAIN_PATH'] = curriculum_paths[0]
     validate_directory_structure(pseudo_config['TRAIN_PATH'], pseudo_config['VAL_PATH'], pseudo_config['TEST_PATH'])
-    
-    # Create training dataset from combined data
-    custom_sample_file, is_custom_sample = process_samples_from_config(pseudo_config)
-    train_df, num_classes = create_train(
-        pseudo_config['TRAIN_PATH'],
-        seed=config['SEED'],
-        ns=custom_sample_file['default'], 
-        custom_sample=is_custom_sample, 
-        custom_file=custom_sample_file
-    )
-    classes = train_df['Label'].unique()
-    class_map = {name: idx for idx, name in enumerate(classes)}
-    df_size = train_df.shape[0]
-    
-    # Save class mapping
-    with open(os.path.join(output_fpath, pseudo_config['SAVEFILE']+'_class_map.yaml'), 'w') as file:
-        yaml.dump(class_map, file, default_flow_style=False)
-    
-    print('Number of classes: {}'.format(num_classes) + '\n')
-    print_dsinfo(train_df, 'Training Data (Combined Original + Pseudo-labeled)')
     
     # Create validation dataset
     val_df = create_fixed(pseudo_config['VAL_PATH'])
@@ -381,7 +366,7 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     print(f"\nLoading fine-tuned possum model from {possum_model_path}")
     with strategy.scope():
         try:
-            # Try to load the model with custom objects
+            # Load model
             model = models.load_model(possum_model_path, custom_objects=custom_objects, compile=False)
             print("Possum model loaded successfully with custom objects")
         except Exception as e:
@@ -397,53 +382,108 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
                 print(f"TensorFlow loading also failed: {e2}")
                 print("WARNING: Unable to load the possum model. Cannot proceed with training.")
                 return None
+    
+    # Create datasets and train with curriculum learning
+    best_model_path = None
+    epochs_per_stage = max(1, pseudo_config['PROG_TOT_EPOCH'] // num_curriculum_stages)
+    
+    # Train on each curriculum stage
+    for stage, train_path in enumerate(curriculum_paths):
+        print(f"\n----- Curriculum Stage {stage+1}/{num_curriculum_stages} -----")
+        print(f"Training on data from: {train_path}")
         
-        # Unfreeze for fine-tuning on combined data
-        model = unfreeze_model(pseudo_config, model, num_classes, df_size)
-    
-    model.summary()
-    
-    # Create datasets for progressive training
-    print('\nCreating datasets for progressive training...')
-    prog_train = []
-    for i in range(pseudo_config['PROG_TOT_EPOCH']):
-        train_tmp, _ = create_train(
+        # Update training path for this stage
+        pseudo_config['TRAIN_PATH'] = train_path
+        
+        # Create training dataset for this curriculum stage
+        custom_sample_file, is_custom_sample = process_samples_from_config(pseudo_config)
+        train_df, num_classes = create_train(
             pseudo_config['TRAIN_PATH'],
-            seed=(config['SEED']+i),
+            seed=config['SEED'],
             ns=custom_sample_file['default'], 
             custom_sample=is_custom_sample, 
             custom_file=custom_sample_file
         )
-        prog_train.append(train_tmp)
+        classes = train_df['Label'].unique()
+        class_map = {name: idx for idx, name in enumerate(classes)}
+        df_size = train_df.shape[0]
+        
+        print(f"Stage {stage+1} training data:")
+        print_dsinfo(train_df, f'Curriculum Stage {stage+1} Training Data')
+        
+        # Unfreeze model for fine-tuning on this curriculum stage
+        with strategy.scope():
+            stage_model = unfreeze_model(pseudo_config, model, num_classes, df_size)
+        
+        # Create progressive training datasets for this stage
+        print(f'Creating datasets for stage {stage+1} progressive training...')
+        prog_train = []
+        for i in range(epochs_per_stage):
+            train_tmp, _ = create_train(
+                pseudo_config['TRAIN_PATH'],
+                seed=(config['SEED'] + (stage * epochs_per_stage) + i),
+                ns=custom_sample_file['default'], 
+                custom_sample=is_custom_sample, 
+                custom_file=custom_sample_file
+            )
+            prog_train.append(train_tmp)
+        
+        # Customize stage-specific config
+        stage_config = pseudo_config.copy()
+        stage_config['PROG_TOT_EPOCH'] = epochs_per_stage
+        stage_config['SAVEFILE'] = f"{pseudo_config['SAVEFILE']}_stage_{stage+1}"
+        
+        # Setup output path for this stage
+        stage_output_path = os.path.join(output_fpath, f"stage_{stage+1}")
+        ensure_output_directory(stage_output_path)
+        
+        # Train the model for this curriculum stage
+        prog_hists, stage_model, stage_best_model_path = fit_progressive(
+            stage_config, stage_model,
+            prog_train=prog_train,
+            val_df=val_df,
+            output_fpath=stage_output_path,
+            img_size=img_size
+        )
+        
+        # Save training history
+        history_path = save_training_history(
+            prog_hists, 
+            stage_output_path, 
+            f"{stage_config['SAVEFILE']}_{config['MODEL']}"
+        )
+        print(f"Stage {stage+1} training history saved to: {history_path}")
+        
+        # Update best model path and continue to next stage with the best model
+        model = models.load_model(stage_best_model_path, custom_objects=custom_objects, compile=False)
+        best_model_path = stage_best_model_path
+        
+        # Evaluate after this stage
+        print(f"\nEvaluating after curriculum stage {stage+1}:")
+        calc_class_metrics(
+            model_fpath=stage_best_model_path,
+            test_fpath=pseudo_config['TEST_PATH'],
+            output_fpath=stage_output_path,
+            classes=classes,
+            batch_size=pseudo_config["BATCH_SIZE"],
+            img_size=img_size
+        )
     
-    # Progressively fine-tune the model
-    prog_hists, model, best_model_fpath = fit_progressive(
-        pseudo_config, model,
-        prog_train=prog_train,
-        val_df=val_df,
-        output_fpath=output_fpath,
-        img_size=img_size
-    )
+    # After all curriculum stages, evaluate the final model
+    final_output_path = os.path.join(output_fpath, "final")
+    ensure_output_directory(final_output_path)
     
-    # Save training history
-    history_path = save_training_history(
-        prog_hists, 
-        output_fpath, 
-        f"{pseudo_config['SAVEFILE']}_{config['MODEL']}"
-    )
-    print(f"Pseudo trained model training history saved to: {history_path}")
-
-    # Evaluate on possum test set
+    print("\nFinal evaluation after all curriculum stages:")
     calc_class_metrics(
-        model_fpath=best_model_fpath,
+        model_fpath=best_model_path,
         test_fpath=pseudo_config['TEST_PATH'],
-        output_fpath=output_fpath,
+        output_fpath=final_output_path,
         classes=classes,
         batch_size=pseudo_config["BATCH_SIZE"],
         img_size=img_size
     )
     
-    return best_model_fpath
+    return best_model_path
 
 def main():
     # Set environment variables
@@ -516,9 +556,14 @@ def main():
         print(f"\nSkipping Stage 2. Using possum model: {possum_model_path}")
     
     if start_stage <= 3:
-        final_model_path = generate_and_train_with_pseudo_labels(
-            config, possum_model_path, possum_classes, img_size, strategy
-        )
+        if config.get('USE_CURRICULUM', True):  # Default to using curriculum
+            final_model_path = generate_and_train_with_pseudo_labels_curriculum(
+                config, possum_model_path, possum_classes, img_size, strategy
+            )
+        else:
+            final_model_path = generate_and_train_with_pseudo_labels(
+                config, possum_model_path, possum_classes, img_size, strategy
+            )
         print(f"\nPipeline complete! Final model saved to: {final_model_path}")
     else:
         print("\nSkipping Stage 3 and 4. Pipeline complete!")
