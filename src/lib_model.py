@@ -8,6 +8,7 @@ from sklearn import metrics
 from matplotlib import rcParams
 import pandas as pd
 import os
+import tensorflow as tf
 
 # Configures the optimizer and loss function
 def configure_optimizer_and_loss(config, num_classes, df_size, class_weights=None):
@@ -208,7 +209,7 @@ def fit_frozen(config, model, train_df, val_df, num_classes, df_size, img_size):
     return(hist, model)  
         
 # Fine-tunes the model progressively with blocks unfrozen and increasing regularisation
-def fit_progressive(config, model, train_df, val_df, output_fpath, img_size): 
+def fit_progressive(config, model, prog_train, val_df, output_fpath, img_size): 
     if model._compile_loss is None:
         print(">>> Error: Model NOT compiled.")
         sys.exit(1)
@@ -220,6 +221,12 @@ def fit_progressive(config, model, train_df, val_df, output_fpath, img_size):
     total_epochs = max(config['PROG_TOT_EPOCH'], stages*prog_stage_len)
     best_model_fpath = os.path.join(output_fpath, config['SAVEFILE']+'_'+config['MODEL']+'.keras')
     val_ds = create_tensorset(val_df, img_size, batch_size=config['BATCH_SIZE'])
+    
+    # Verify that we have enough training datasets for all epochs
+    if len(prog_train) < total_epochs:
+        print(f"Warning: Only {len(prog_train)} training datasets provided for {total_epochs} epochs.")
+        print("Using available datasets in a cyclic manner.")
+    
     for stage, dropout, magnitude in zip(range(stages), config['DROPOUTS'], config['MAGNITUDES']):
         if stage == 0:
             seq = range(stage, prog_stage_len)
@@ -234,7 +241,9 @@ def fit_progressive(config, model, train_df, val_df, output_fpath, img_size):
                 if isinstance(model.layers[layer_index], layers.Dropout):
                     model.layers[layer_index].rate = dropout 
         for i in seq:
-            train_ds = create_tensorset(train_df[i], img_size, batch_size=config['BATCH_SIZE'], 
+            # Use modulo to cycle through available datasets if needed
+            dataset_index = i % len(prog_train)
+            train_ds = create_tensorset(prog_train[dataset_index], img_size, batch_size=config['BATCH_SIZE'], 
                                         magnitude=magnitude, n_augments=config['NUM_AUG'], ds_name="train")            
             history = model.fit(train_ds, initial_epoch=i, epochs=(i+1), validation_data=val_ds) 
             histories.append(history)
@@ -250,7 +259,43 @@ def fit_progressive(config, model, train_df, val_df, output_fpath, img_size):
 def calc_class_metrics(model_fpath, test_fpath, output_fpath, classes, batch_size, img_size):
     nc = len(classes)
     print(f"\nCalculating class-specific metrics for best model '{model_fpath}'")
-    loaded_model = models.load_model(model_fpath, compile=False)
+    
+    # Define custom_objects dictionary to help with model loading
+    custom_objects = {
+        'EfficientNetV2S': kimm.models.EfficientNetV2S,
+        'EfficientNetV2B0': kimm.models.EfficientNetV2B0,
+        'EfficientNetV2B2': kimm.models.EfficientNetV2B2,
+        'EfficientNetV2M': kimm.models.EfficientNetV2M,
+        'EfficientNetV2L': kimm.models.EfficientNetV2L,
+        'EfficientNetV2XL': kimm.models.EfficientNetV2XL,
+        'ConvNeXtPico': kimm.models.ConvNeXtPico,
+        'ConvNeXtNano': kimm.models.ConvNeXtNano,
+        'ConvNeXtTiny': kimm.models.ConvNeXtTiny,
+        'ConvNeXtSmall': kimm.models.ConvNeXtSmall,
+        'ConvNeXtBase': kimm.models.ConvNeXtBase,
+        'ConvNeXtLarge': kimm.models.ConvNeXtLarge,
+        'VisionTransformerTiny16': kimm.models.VisionTransformerTiny16,
+        'VisionTransformerSmall16': kimm.models.VisionTransformerSmall16,
+        'VisionTransformerBase16': kimm.models.VisionTransformerBase16,
+        'VisionTransformerLarge16': kimm.models.VisionTransformerLarge16
+    }
+    
+    try:
+        # Try to load the model with custom objects
+        loaded_model = models.load_model(model_fpath, custom_objects=custom_objects, compile=False)
+        print("Model loaded successfully with custom objects")
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        print("Attempting alternative loading approach...")
+        
+        try:
+            loaded_model = tf.keras.models.load_model(model_fpath, compile=False)
+            print("Model loaded successfully using TensorFlow Keras")
+        except Exception as e2:
+            print(f"TensorFlow loading also failed: {e2}")
+            print("WARNING: Unable to load the model. Evaluation cannot proceed.")
+            return
+    
     loaded_model.trainable = False # Freeze the whole model for inference-only mode thereafter
     saving.save_model(loaded_model, model_fpath, include_optimizer=False) # save best model in a frozen state for smaller file size    
     class_map = {name: idx for idx, name in enumerate(classes)}

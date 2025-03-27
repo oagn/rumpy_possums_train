@@ -135,4 +135,8 @@ dmypy.json
 # Example files
 example_files/
 
+# Docker files
+docker-compose.yml
+Dockerfile
+
 

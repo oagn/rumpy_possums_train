@@ -9,26 +9,28 @@ import tensorflow as tf
 from pathlib import Path
 import argparse
 from keras import models
-
-# Set environment variables
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-os.environ["KERAS_BACKEND"] = "jax"
-import absl.logging
-absl.logging.set_verbosity(absl.logging.ERROR)
+# Import necessary modules for custom objects
+import kimm
 
 # Import custom modules
-from lib_common import update_config_from_env, model_img_size_mapping, read_yaml, setup_strategy
 from lib_model import build_classifier, fit_frozen, fit_progressive, calc_class_metrics, unfreeze_model, save_training_history
 from lib_data import print_dsinfo, create_train, create_fixed, process_samples_from_config, ensure_output_directory, validate_directory_structure
 from lib_pseudo import generate_pseudo_labels, combine_datasets
+from lib_common import update_config_from_env, model_img_size_mapping, read_yaml, setup_strategy
+
 
 def train_wildlife_model(config, strategy):
     """Train the initial model on wildlife data (9 classes)"""
     print("\n===== STAGE 1: Training initial wildlife model =====")
     
-    # Setup paths
-    output_fpath = os.path.join(config['OUTPUT_PATH'], config['SAVEFILE'], config['MODEL'])
+    # Setup paths with wildlife-specific name
+    wildlife_savefile = f"{config['SAVEFILE']}_wildlife"
+    output_fpath = os.path.join(config['OUTPUT_PATH'], wildlife_savefile, config['MODEL'])
     ensure_output_directory(output_fpath)
+    
+    # Create a modified config with the wildlife-specific savefile
+    wildlife_config = config.copy()
+    wildlife_config['SAVEFILE'] = wildlife_savefile
     
     # Validate directory structure
     validate_directory_structure(config['TRAIN_PATH'], config['VAL_PATH'], config['TEST_PATH'])
@@ -82,7 +84,7 @@ def train_wildlife_model(config, strategy):
     # Progressively fine-tune the model
     prog_hists, model, best_model_fpath = fit_progressive(
         config, model,
-        train_df=prog_train,
+        prog_train=prog_train,
         val_df=val_df,
         output_fpath=output_fpath,
         img_size=img_size
@@ -92,7 +94,7 @@ def train_wildlife_model(config, strategy):
     history_path = save_training_history(
         prog_hists, 
         output_fpath, 
-        f"{config['SAVEFILE']}_{config['MODEL']}_wildlife"
+        f"{wildlife_savefile}_{config['MODEL']}_wildlife"
     )
     print(f"Wildlife model training history saved to: {history_path}")
     
@@ -112,19 +114,24 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     """Fine-tune the wildlife model on possum disease data"""
     print("\n===== STAGE 2: Fine-tuning on possum disease data =====")
     
+    # Setup paths with finetuned-specific name
+    finetuned_savefile = f"{config['SAVEFILE']}_finetuned"
+    output_fpath = os.path.join(config['OUTPUT_PATH'], finetuned_savefile, config['MODEL'])
+    ensure_output_directory(output_fpath)
+    
+    # Create a modified config with the finetuned-specific savefile
+    finetuned_config = config.copy()
+    finetuned_config['SAVEFILE'] = finetuned_savefile
+    
     # Update paths for possum data
     possum_config = config.copy()
     possum_config['TRAIN_PATH'] = config['POSSUM_TRAIN_PATH']
     possum_config['VAL_PATH'] = config['POSSUM_VAL_PATH']
     possum_config['TEST_PATH'] = config['POSSUM_TEST_PATH']
-    possum_config['SAVEFILE'] = config['SAVEFILE'] + '_possum'
+    possum_config['SAVEFILE'] = finetuned_savefile
     
     # Set up class weighting to handle imbalance
     possum_config['USE_CLASS_WEIGHTS'] = True
-    
-    # Setup output path
-    output_fpath = os.path.join(config['OUTPUT_PATH'], possum_config['SAVEFILE'], config['MODEL'])
-    ensure_output_directory(output_fpath)
     
     # Validate directory structure
     validate_directory_structure(possum_config['TRAIN_PATH'], possum_config['VAL_PATH'], possum_config['TEST_PATH'])
@@ -153,10 +160,49 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     val_df = create_fixed(possum_config['VAL_PATH'])
     print_dsinfo(val_df, 'Validation Data')
     
-    # Load pre-trained wildlife model
+    # Load pre-trained wildlife model with custom objects
     print(f"\nLoading pre-trained wildlife model from {wildlife_model_path}")
+    
+    # Define custom_objects dictionary to help with model loading
+    custom_objects = {
+        'EfficientNetV2S': kimm.models.EfficientNetV2S,
+        'EfficientNetV2B0': kimm.models.EfficientNetV2B0,
+        'EfficientNetV2B2': kimm.models.EfficientNetV2B2,
+        'EfficientNetV2M': kimm.models.EfficientNetV2M,
+        'EfficientNetV2L': kimm.models.EfficientNetV2L,
+        'EfficientNetV2XL': kimm.models.EfficientNetV2XL,
+        'ConvNeXtPico': kimm.models.ConvNeXtPico,
+        'ConvNeXtNano': kimm.models.ConvNeXtNano,
+        'ConvNeXtTiny': kimm.models.ConvNeXtTiny,
+        'ConvNeXtSmall': kimm.models.ConvNeXtSmall,
+        'ConvNeXtBase': kimm.models.ConvNeXtBase,
+        'ConvNeXtLarge': kimm.models.ConvNeXtLarge,
+        'VisionTransformerTiny16': kimm.models.VisionTransformerTiny16,
+        'VisionTransformerSmall16': kimm.models.VisionTransformerSmall16,
+        'VisionTransformerBase16': kimm.models.VisionTransformerBase16,
+        'VisionTransformerLarge16': kimm.models.VisionTransformerLarge16
+    }
+    
     with strategy.scope():
-        wildlife_model = models.load_model(wildlife_model_path, compile=False)
+        try:
+            # Try to load the model with custom objects
+            wildlife_model = models.load_model(wildlife_model_path, custom_objects=custom_objects, compile=False)
+            print("Wildlife model loaded successfully with custom objects")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            print("Attempting alternative loading approach...")
+            
+            try:
+                # Try using TensorFlow's keras instead
+                wildlife_model = tf.keras.models.load_model(wildlife_model_path, compile=False)
+                print("Wildlife model loaded successfully using TensorFlow Keras")
+            except Exception as e2:
+                print(f"TensorFlow loading also failed: {e2}")
+                print("WARNING: Unable to load the wildlife model. Will rebuild from scratch.")
+                
+                # Rebuild the model from scratch as a last resort
+                wildlife_model = build_classifier(config, 9, 1000, img_size)  # 9 classes for wildlife
+                print("Rebuilt wildlife model from scratch (untrained)")
         
         # Modify the model to have the correct number of classes for possum disease
         wildlife_model.pop()  # Remove the last classification layer
@@ -200,15 +246,18 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     for class_name, idx in class_map.items():
         print(f"  Class {class_name}: weight = {class_weights[idx]:.2f}")
     
-    # Pass class counts to the progressive training function
-    prog_hists, model, best_model_fpath = fit_progressive_balanced(
-        possum_config, model,
-        train_df=prog_train,
-        val_df=val_df,
-        output_fpath=output_fpath,
-        img_size=img_size,
-        class_counts=class_counts
+    # Pass class weights to the progressive training function
+    prog_hists, model, best_model_fpath = fit_progressive(
+        possum_config, model, prog_train, val_df, output_fpath, img_size
     )
+    
+    # Save training history
+    history_path = save_training_history(
+        prog_hists, 
+        output_fpath, 
+        f"{finetuned_savefile}_{config['MODEL']}"
+    )
+    print(f"Finetuned model training history saved to: {history_path}")
     
     # Evaluate on possum test set
     calc_class_metrics(
@@ -229,13 +278,42 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     # Define paths for this stage
     pseudo_config = config.copy()
     pseudo_config['TRAIN_PATH'] = config['POSSUM_TRAIN_PATH']
-    pseudo_config['VAL_PATH'] = config['POSSUM_VAL_PATH'] 
+    pseudo_config['VAL_PATH'] = config['POSSUM_VAL_PATH']
     pseudo_config['TEST_PATH'] = config['POSSUM_TEST_PATH']
     pseudo_config['SAVEFILE'] = config['SAVEFILE'] + '_pseudo'
+    
+    # Explicitly remove CLASS_SAMPLES_SPECIFIC to force using CLASS_SAMPLES_DEFAULT only
+    if 'CLASS_SAMPLES_SPECIFIC' in pseudo_config:
+        print(f"Removing class-specific sample settings for pseudo-label training")
+        del pseudo_config['CLASS_SAMPLES_SPECIFIC']
+    
+    # Get CLASS_SAMPLES_DEFAULT directly from the config
+    default_samples = pseudo_config['CLASS_SAMPLES_DEFAULT']
+    print(f"Using CLASS_SAMPLES_DEFAULT: {default_samples} for pseudo-label training")
     
     # Setup output path
     output_fpath = os.path.join(config['OUTPUT_PATH'], pseudo_config['SAVEFILE'], config['MODEL'])
     ensure_output_directory(output_fpath)
+    
+    # Define custom_objects dictionary to help with model loading
+    custom_objects = {
+        'EfficientNetV2S': kimm.models.EfficientNetV2S,
+        'EfficientNetV2B0': kimm.models.EfficientNetV2B0,
+        'EfficientNetV2B2': kimm.models.EfficientNetV2B2,
+        'EfficientNetV2M': kimm.models.EfficientNetV2M,
+        'EfficientNetV2L': kimm.models.EfficientNetV2L,
+        'EfficientNetV2XL': kimm.models.EfficientNetV2XL,
+        'ConvNeXtPico': kimm.models.ConvNeXtPico,
+        'ConvNeXtNano': kimm.models.ConvNeXtNano,
+        'ConvNeXtTiny': kimm.models.ConvNeXtTiny,
+        'ConvNeXtSmall': kimm.models.ConvNeXtSmall,
+        'ConvNeXtBase': kimm.models.ConvNeXtBase,
+        'ConvNeXtLarge': kimm.models.ConvNeXtLarge,
+        'VisionTransformerTiny16': kimm.models.VisionTransformerTiny16,
+        'VisionTransformerSmall16': kimm.models.VisionTransformerSmall16,
+        'VisionTransformerBase16': kimm.models.VisionTransformerBase16,
+        'VisionTransformerLarge16': kimm.models.VisionTransformerLarge16
+    }
     
     # Generate pseudo-labels for unlabeled data
     unlabeled_path = config['UNLABELED_POSSUM_PATH']
@@ -243,26 +321,32 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     ensure_output_directory(pseudo_labeled_path)
     
     confidence_threshold = float(config.get('PSEUDO_LABEL_CONFIDENCE', 0.7))
-    pseudo_df = generate_pseudo_labels(
+    
+    # Load the possum model
+    csv_path = generate_pseudo_labels(
         model_path=possum_model_path,
         unlabeled_dir=unlabeled_path,
         output_dir=pseudo_labeled_path,
         classes=possum_classes,
         confidence_threshold=confidence_threshold,
-        img_size=img_size
+        img_size=img_size,
+        custom_objects=custom_objects
     )
+    
+    if csv_path is None:
+        print("No pseudo-labels generated. Cannot proceed with Stage 4.")
+        return None
     
     print("\n===== STAGE 4: Training on combined labeled + pseudo-labeled data =====")
     
     # Combine original labeled data with pseudo-labeled data
     combined_train_path = os.path.join(config['OUTPUT_PATH'], 'combined_train')
-    ensure_output_directory(combined_train_path)
     pseudo_config['TRAIN_PATH'] = combined_train_path
     
-    # Create combined dataset
+    # Create combined dataset using the CSV file instead of copying files again
     combine_datasets(
         original_train_path=config['POSSUM_TRAIN_PATH'],
-        pseudo_labeled_path=pseudo_labeled_path,
+        pseudo_labeled_csv_path=csv_path,
         output_path=combined_train_path
     )
     
@@ -296,7 +380,24 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     # Load fine-tuned possum model
     print(f"\nLoading fine-tuned possum model from {possum_model_path}")
     with strategy.scope():
-        model = models.load_model(possum_model_path, compile=False)
+        try:
+            # Try to load the model with custom objects
+            model = models.load_model(possum_model_path, custom_objects=custom_objects, compile=False)
+            print("Possum model loaded successfully with custom objects")
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            print("Attempting alternative loading approach...")
+            
+            try:
+                # Try using TensorFlow's keras instead
+                import tensorflow as tf
+                model = tf.keras.models.load_model(possum_model_path, compile=False)
+                print("Possum model loaded successfully using TensorFlow Keras")
+            except Exception as e2:
+                print(f"TensorFlow loading also failed: {e2}")
+                print("WARNING: Unable to load the possum model. Cannot proceed with training.")
+                return None
+        
         # Unfreeze for fine-tuning on combined data
         model = unfreeze_model(pseudo_config, model, num_classes, df_size)
     
@@ -318,12 +419,20 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     # Progressively fine-tune the model
     prog_hists, model, best_model_fpath = fit_progressive(
         pseudo_config, model,
-        train_df=prog_train,
+        prog_train=prog_train,
         val_df=val_df,
         output_fpath=output_fpath,
         img_size=img_size
     )
     
+    # Save training history
+    history_path = save_training_history(
+        prog_hists, 
+        output_fpath, 
+        f"{pseudo_config['SAVEFILE']}_{config['MODEL']}"
+    )
+    print(f"Pseudo trained model training history saved to: {history_path}")
+
     # Evaluate on possum test set
     calc_class_metrics(
         model_fpath=best_model_fpath,
@@ -337,6 +446,14 @@ def generate_and_train_with_pseudo_labels(config, possum_model_path, possum_clas
     return best_model_fpath
 
 def main():
+    # Set environment variables
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    os.environ["KERAS_BACKEND"] = "jax"
+    # Disable XLA for TensorFlow to avoid ptxas version issues
+    os.environ["TF_XLA_FLAGS"] = "--tf_xla_enable_xla_devices=false"
+    import absl.logging
+    absl.logging.set_verbosity(absl.logging.ERROR)
+
     parser = argparse.ArgumentParser(description='Possum disease classification pipeline')
     parser.add_argument('--stage', type=int, default=0, 
                         help='Start from specific stage (0=all, 1=wildlife, 2=possum, 3=pseudo)')
@@ -371,10 +488,31 @@ def main():
         possum_model_path, possum_classes, _ = finetune_on_possum(config, wildlife_model_path, img_size, strategy)
     else:
         # Load possum classes from the existing model's class map
-        possum_output_path = os.path.join(config['OUTPUT_PATH'], config['SAVEFILE'] + '_possum', config['MODEL'])
-        with open(os.path.join(possum_output_path, config['SAVEFILE'] + '_possum_class_map.yaml'), 'r') as file:
-            class_map = yaml.safe_load(file)
-        possum_classes = list(class_map.keys())
+        # Extract model directory from the model path
+        possum_model_dir = os.path.dirname(possum_model_path)
+        
+        # Look for class map file in the same directory as the model
+        possible_class_maps = [
+            os.path.join(possum_model_dir, f"{config['SAVEFILE']}_finetuned_class_map.yaml"),
+            os.path.join(possum_model_dir, f"{config['SAVEFILE']}_possum_class_map.yaml"),
+            # Add more possible patterns if needed
+        ]
+        
+        # Try each possible class map path
+        class_map_found = False
+        for class_map_path in possible_class_maps:
+            if os.path.exists(class_map_path):
+                print(f"Found class map at: {class_map_path}")
+                with open(class_map_path, 'r') as file:
+                    class_map = yaml.safe_load(file)
+                possum_classes = list(class_map.keys())
+                class_map_found = True
+                break
+        
+        if not class_map_found:
+            raise FileNotFoundError(f"Could not find class map file in {possum_model_dir}. "
+                                   f"Tried paths: {possible_class_maps}")
+        
         print(f"\nSkipping Stage 2. Using possum model: {possum_model_path}")
     
     if start_stage <= 3:
