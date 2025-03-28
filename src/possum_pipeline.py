@@ -385,7 +385,7 @@ def generate_and_train_with_pseudo_labels_curriculum(config, possum_model_path, 
     
     # Create datasets and train with curriculum learning
     best_model_path = None
-    epochs_per_stage = max(1, pseudo_config['PROG_TOT_EPOCH'] // num_curriculum_stages)
+    epochs_per_stage = pseudo_config['PROG_TOT_EPOCH']  # Use full number of epochs
     
     # Train on each curriculum stage
     for stage, train_path in enumerate(curriculum_paths):
@@ -415,7 +415,7 @@ def generate_and_train_with_pseudo_labels_curriculum(config, possum_model_path, 
         with strategy.scope():
             stage_model = unfreeze_model(pseudo_config, model, num_classes, df_size)
         
-        # Create progressive training datasets for this stage
+        # Create progressive training datasets for this stage - fixed to create one per epoch
         print(f'Creating datasets for stage {stage+1} progressive training...')
         prog_train = []
         for i in range(epochs_per_stage):

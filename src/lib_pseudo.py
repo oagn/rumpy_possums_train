@@ -289,6 +289,10 @@ def create_curriculum_datasets(original_train_path, pseudo_labeled_csv_path, out
     print(f"Total pseudo-labeled samples: {total_samples}")
     print(f"Samples per curriculum stage: {samples_per_stage}")
     
+    # Fix 2: Save the CSV to a temporary directory first
+    temp_dir = os.path.join(output_base_path, "temp_csv")
+    os.makedirs(temp_dir, exist_ok=True)
+    
     # Create datasets for each curriculum stage
     curriculum_paths = []
     for stage, num_samples in enumerate(samples_per_stage):
@@ -300,8 +304,8 @@ def create_curriculum_datasets(original_train_path, pseudo_labeled_csv_path, out
         min_conf_in_stage = stage_df['Confidence'].min()
         print(f"Stage {stage+1}: Using {num_samples} samples with confidence >= {min_conf_in_stage:.4f}")
         
-        # Create a temporary CSV for this stage
-        stage_csv_path = os.path.join(stage_path, f"pseudo_labels_stage_{stage+1}.csv")
+        # Create a temporary CSV for this stage in the temp directory
+        stage_csv_path = os.path.join(temp_dir, f"pseudo_labels_stage_{stage+1}.csv")
         stage_df.to_csv(stage_csv_path, index=False)
         
         # Combine original data with this stage's pseudo-labels
