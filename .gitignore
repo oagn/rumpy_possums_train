@@ -134,6 +134,7 @@ dmypy.json
 
 # Example files
 example_files/
+reportts/
 
 # Docker files
 docker-compose.yml
