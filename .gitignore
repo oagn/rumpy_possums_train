@@ -132,8 +132,10 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Example files
+# Folders to ignore
 example_files/
+reports/
+
 
 # Docker files
 docker-compose.yml
