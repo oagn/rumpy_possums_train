@@ -17,6 +17,7 @@ def parse_classification_report(report_text):
     # Skip header lines
     data_lines = []
     for line in lines:
+        # This regex will match class rows (numbers) as well as summary rows
         if re.match(r'\s*\d+|accuracy|macro avg|weighted avg', line):
             data_lines.append(line)
     
@@ -34,6 +35,7 @@ def parse_classification_report(report_text):
                     'support': int(parts[2])
                 })
             else:
+                # Class rows (might be any numeric class)
                 metrics_data.append({
                     'class': parts[0],
                     'precision': float(parts[1]),
@@ -41,100 +43,131 @@ def parse_classification_report(report_text):
                     'f1-score': float(parts[3]),
                     'support': int(parts[4])
                 })
+        elif "avg" in line and len(parts) >= 5:  # For average rows
+            metrics_data.append({
+                'class': ' '.join(parts[:-4]).strip(),  # Join words before metrics
+                'precision': float(parts[-4]),
+                'recall': float(parts[-3]),
+                'f1-score': float(parts[-2]),
+                'support': int(parts[-1])
+            })
     
     return metrics_data
 
 
-def extract_reports_with_exact_pattern(log_content, debug=False):
-    """Extract classification reports using a pattern that exactly matches the format in the log file."""
+def extract_reports_with_flexible_pattern(log_content, debug=False):
+    """Extract classification reports using a flexible pattern that works with any class set."""
     
-    # Define a pattern that exactly matches the format shown in the user's example
-    exact_pattern = r"""Classification report:
-              precision    recall  f1-score   support
-
-\s+0\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)
-\s+12\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)
-\s+99\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)
-
-    accuracy\s+(\d+\.\d+)\s+(\d+)
-   macro avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)
-weighted avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)"""
-    
-    # Try to find matches for this exact pattern
-    exact_matches = re.findall(exact_pattern, log_content, re.MULTILINE)
+    # Find all "Classification report:" headers
+    report_header_positions = [m.start() for m in re.finditer(r"Classification report:", log_content)]
     
     if debug:
-        print("Found {0} reports matching the exact format pattern".format(len(exact_matches)))
-        
-        # If we didn't find any matches, try to see if the classification report header exists
-        if len(exact_matches) == 0:
-            header_count = log_content.count("Classification report:")
-            if header_count > 0:
-                print("Found {0} 'Classification report:' headers, but couldn't match the full pattern".format(header_count))
-                
-                # Show a short section after one of the headers to debug
-                header_pos = log_content.find("Classification report:")
-                if header_pos >= 0:
-                    print("Sample section after a header:")
-                    print(log_content[header_pos:header_pos+300])
+        print(f"Found {len(report_header_positions)} 'Classification report:' headers")
+        if report_header_positions:
+            for i, pos in enumerate(report_header_positions[:3]):  # Show first 3 for debugging
+                print(f"Header {i+1} at position {pos}:")
+                print(log_content[pos:pos+200].replace('\n', ' ')[:100] + "...")
     
-    # If we didn't find any matches with the exact pattern, try a more flexible one
-    if len(exact_matches) == 0:
-        # More flexible pattern that allows for variations in whitespace
-        flexible_pattern = r"""Classification report:
-\s+precision\s+recall\s+f1-score\s+support\s*
-
-\s+0\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*
-\s+12\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*
-\s+99\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*
-
-\s+accuracy\s+(\d+\.\d+)\s+(\d+)\s*
-\s+macro avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*
-\s+weighted avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)"""
-        
-        flexible_matches = re.findall(flexible_pattern, log_content, re.MULTILINE)
-        if debug:
-            print("Found {0} reports with the flexible pattern".format(len(flexible_matches)))
-        
-        # If we found matches with the flexible pattern, use those
-        if len(flexible_matches) > 0:
-            exact_matches = flexible_matches
+    # If no headers found, return empty list
+    if not report_header_positions:
+        return []
     
-    # If we still didn't find any matches, try an even more flexible pattern
-    if len(exact_matches) == 0:
-        # Super flexible pattern
-        super_flexible_pattern = r"""Classification report:.*?
-.*?precision.*?recall.*?f1-score.*?support.*?
-
-.*?0.*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+).*?
-.*?12.*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+).*?
-.*?99.*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+).*?
-
-.*?accuracy.*?(\d+\.\d+).*?(\d+).*?
-.*?macro avg.*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+).*?
-.*?weighted avg.*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+)"""
-        
-        super_flexible_matches = re.findall(super_flexible_pattern, log_content, re.MULTILINE | re.DOTALL)
-        if debug:
-            print("Found {0} reports with super flexible pattern".format(len(super_flexible_matches)))
-        
-        if len(super_flexible_matches) > 0:
-            exact_matches = super_flexible_matches
-            
-    # If we found matches, convert them to structured data
     parsed_reports = []
     
-    for i, match in enumerate(exact_matches):
-        # Find the position of this match in the log content
-        match_text = "Classification report:"  # Start of the match
-        all_occurrences = [m.start() for m in re.finditer(re.escape(match_text), log_content)]
+    for i, pos in enumerate(report_header_positions):
+        # Extract a chunk of text after the header (enough to contain a full report)
+        chunk_end = pos + 4000  # Increased from 2000 to 4000 to ensure we get the full report
+        if i + 1 < len(report_header_positions) and report_header_positions[i + 1] < chunk_end:
+            chunk_end = report_header_positions[i + 1]  # Stop at the next report header
         
-        if i < len(all_occurrences):
-            report_start_idx = all_occurrences[i]
-            context_start = max(0, report_start_idx - 1000)
-            context_before = log_content[context_start:report_start_idx]
+        chunk = log_content[pos:chunk_end]
+        
+        if debug and i < 2:  # Show first 2 chunks for debugging
+            print(f"\nChunk {i+1} (first 300 chars):")
+            print(chunk[:300].replace('\n', ' '))
+        
+        # Find the header line with "precision recall f1-score support"
+        header_match = re.search(r"precision\s+recall\s+f1-score\s+support", chunk)
+        if not header_match:
+            if debug:
+                print(f"Couldn't find header line in report {i+1}")
+            continue
+        
+        # Get the part starting from the header line
+        report_start = header_match.start()
+        report_chunk = chunk[report_start:]
+        
+        if debug and i < 2:
+            print(f"\nReport chunk {i+1} (first 300 chars after header):")
+            print(report_chunk[:300].replace('\n', ' '))
+        
+        # Find where the report ends (usually two blank lines or end of chunk)
+        report_end_match = re.search(r"\n\s*\n", report_chunk)
+        if report_end_match:
+            report_chunk = report_chunk[:report_end_match.end()]
+        
+        # Super flexible approach to extract class rows
+        # This matches any row that starts with digits followed by decimals
+        class_rows = []
+        
+        # First try the standard pattern for lines with class number + 4 numeric values
+        std_rows = re.findall(r"\s*(\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*", report_chunk)
+        if std_rows:
+            class_rows = std_rows
+            if debug:
+                print(f"Found {len(std_rows)} standard class rows in report {i+1}")
         else:
-            context_before = ""
+            # Try alternate pattern - looser matching
+            alt_rows = re.findall(r"\s*(\d+)(?:\s+|[:\.,])+(\d+\.\d+)(?:\s+|[:\.,])+(\d+\.\d+)(?:\s+|[:\.,])+(\d+\.\d+)(?:\s+|[:\.,])+(\d+)", report_chunk)
+            class_rows = alt_rows
+            if debug:
+                print(f"Found {len(alt_rows)} alternate class rows in report {i+1}")
+            
+            # If still no results, try an even looser pattern
+            if not alt_rows:
+                # This pattern is very loose and might catch non-class rows, so use with caution
+                super_loose = re.findall(r"(\d+)[\s:]*(\d+\.\d+)[\s:]*(\d+\.\d+)[\s:]*(\d+\.\d+)[\s:]*(\d+)", report_chunk)
+                class_rows = super_loose
+                if debug:
+                    print(f"Found {len(super_loose)} super loose class rows in report {i+1}")
+        
+        # Try to match other report elements
+        # Match accuracy
+        accuracy_row = re.search(r"\s*accuracy\s+(\d+\.\d+)\s+(\d+)\s*", report_chunk)
+        if not accuracy_row:
+            # Try alternate pattern
+            accuracy_row = re.search(r"accuracy.*?(\d+\.\d+).*?(\d+)", report_chunk)
+        
+        # Match macro avg
+        macro_avg_row = re.search(r"\s*macro avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*", report_chunk)
+        if not macro_avg_row:
+            # Try alternate pattern
+            macro_avg_row = re.search(r"macro avg.*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+)", report_chunk)
+        
+        # Match weighted avg
+        weighted_avg_row = re.search(r"\s*weighted avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*", report_chunk)
+        if not weighted_avg_row:
+            # Try alternate pattern
+            weighted_avg_row = re.search(r"weighted avg.*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+\.\d+).*?(\d+)", report_chunk)
+        
+        # Print what we found for debugging
+        if debug:
+            print(f"Report {i+1}: Found {len(class_rows)} class rows, " 
+                  f"accuracy: {'Yes' if accuracy_row else 'No'}, "
+                  f"macro avg: {'Yes' if macro_avg_row else 'No'}, "
+                  f"weighted avg: {'Yes' if weighted_avg_row else 'No'}")
+            
+            if class_rows:
+                print(f"Sample class row: {class_rows[0]}")
+        
+        # If we didn't find any class rows, try parsing the report as text
+        if not class_rows and debug:
+            print(f"No class rows found in report {i+1}, falling back to text parsing")
+            # We'll proceed anyway to try the next fallback method
+        
+        # Extract context information (for stage/iteration)
+        context_start = max(0, pos - 1000)
+        context_before = log_content[context_start:pos]
         
         # Look for stage and iteration information
         iteration_match = re.search(r"Iteration (\d+)/\d+", context_before)
@@ -156,82 +189,75 @@ weighted avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)"""
                     stage = curriculum_match.group(1)
                     iteration = curriculum_match.group(2)
         
-        # Add class 0 metrics
-        parsed_reports.append({
-            'class': '0',
-            'precision': float(match[0]),
-            'recall': float(match[1]),
-            'f1-score': float(match[2]),
-            'support': int(match[3]),
-            'iteration': iteration,
-            'stage': stage,
-            'report_index': i
-        })
+        # Process class rows
+        for class_row in class_rows:
+            class_name, precision, recall, f1_score, support = class_row
+            parsed_reports.append({
+                'class': class_name,
+                'precision': float(precision),
+                'recall': float(recall),
+                'f1-score': float(f1_score),
+                'support': int(support),
+                'iteration': iteration,
+                'stage': stage,
+                'report_index': i
+            })
         
-        # Add class 12 metrics
-        parsed_reports.append({
-            'class': '12',
-            'precision': float(match[4]),
-            'recall': float(match[5]),
-            'f1-score': float(match[6]),
-            'support': int(match[7]),
-            'iteration': iteration,
-            'stage': stage,
-            'report_index': i
-        })
+        # Process accuracy
+        if accuracy_row:
+            parsed_reports.append({
+                'class': 'accuracy',
+                'precision': None,
+                'recall': None,
+                'f1-score': float(accuracy_row.group(1)),
+                'support': int(accuracy_row.group(2)),
+                'iteration': iteration,
+                'stage': stage,
+                'report_index': i
+            })
         
-        # Add class 99 metrics
-        parsed_reports.append({
-            'class': '99',
-            'precision': float(match[8]),
-            'recall': float(match[9]),
-            'f1-score': float(match[10]),
-            'support': int(match[11]),
-            'iteration': iteration,
-            'stage': stage,
-            'report_index': i
-        })
+        # Process macro avg
+        if macro_avg_row:
+            parsed_reports.append({
+                'class': 'macro avg',
+                'precision': float(macro_avg_row.group(1)),
+                'recall': float(macro_avg_row.group(2)),
+                'f1-score': float(macro_avg_row.group(3)),
+                'support': int(macro_avg_row.group(4)),
+                'iteration': iteration,
+                'stage': stage,
+                'report_index': i
+            })
         
-        # Add accuracy metrics
-        parsed_reports.append({
-            'class': 'accuracy',
-            'precision': None,
-            'recall': None,
-            'f1-score': float(match[12]),
-            'support': int(match[13]),
-            'iteration': iteration,
-            'stage': stage,
-            'report_index': i
-        })
-        
-        # Add macro avg metrics
-        parsed_reports.append({
-            'class': 'macro avg',
-            'precision': float(match[14]),
-            'recall': float(match[15]),
-            'f1-score': float(match[16]),
-            'support': int(match[17]),
-            'iteration': iteration,
-            'stage': stage,
-            'report_index': i
-        })
-        
-        # Add weighted avg metrics
-        parsed_reports.append({
-            'class': 'weighted avg',
-            'precision': float(match[18]),
-            'recall': float(match[19]),
-            'f1-score': float(match[20]),
-            'support': int(match[21]),
-            'iteration': iteration,
-            'stage': stage,
-            'report_index': i
-        })
+        # Process weighted avg
+        if weighted_avg_row:
+            parsed_reports.append({
+                'class': 'weighted avg',
+                'precision': float(weighted_avg_row.group(1)),
+                'recall': float(weighted_avg_row.group(2)),
+                'f1-score': float(weighted_avg_row.group(3)),
+                'support': int(weighted_avg_row.group(4)),
+                'iteration': iteration,
+                'stage': stage,
+                'report_index': i
+            })
     
-    return parsed_reports
+    # If we found any reports, return them
+    if parsed_reports:
+        if debug:
+            print(f"Successfully extracted {len(parsed_reports)} entries from classification reports")
+        return parsed_reports
+    
+    # Fallback to using the full parse_classification_report approach
+    if debug:
+        print("\nNo reports found with pattern matching, trying direct text parsing...")
+        
+    # Try extracting report blocks and parsing them
+    # This is now handled in the find_and_extract_reports function
+    return []
 
 
-def find_and_extract_reports(log_file_path, debug=False):
+def find_and_extract_reports(log_file_path, debug=False, identifier=None):
     """Find all classification reports in a log file and extract them."""
     with open(log_file_path, 'r', errors='replace') as file:
         log_content = file.read()
@@ -259,200 +285,71 @@ def find_and_extract_reports(log_file_path, debug=False):
         else:
             print("WARNING: File does not contain 'Classification report:' text")
     
-    # Try the exact matching approach first
-    parsed_reports = extract_reports_with_exact_pattern(log_content, debug=debug)
+    # Try the new, more flexible approach first that can handle any class set
+    parsed_reports = extract_reports_with_flexible_pattern(log_content, debug=debug)
     
     # If we got results, return them
     if parsed_reports:
+        # Add identifier if provided
+        if identifier:
+            for report in parsed_reports:
+                report['identifier'] = identifier
         return parsed_reports
     
-    # If still no results, try the older approach with direct pattern matching 
+    # If we still have no results, try a more general approach with parse_classification_report
     if debug:
-        print("\nTrying the previous direct pattern matching approach...")
+        print("\nTrying a more general approach with parse_classification_report...")
     
-    # Define pattern for reports with classes 0, 12, 99 
-    pattern_classes_0_12_99 = r"""precision\s+recall\s+f1-score\s+support\s*
-\s*0\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*
-\s*12\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*
-\s*99\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*
-\s*accuracy\s+(\d+\.\d+)\s+(\d+)\s*
-\s*macro avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)\s*
-\s*weighted avg\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)"""
-    
-    # Try to find matches for this pattern
-    matches_0_12_99 = re.findall(pattern_classes_0_12_99, log_content, re.MULTILINE | re.DOTALL)
+    # Extract all classification reports as text blocks
+    report_pattern = r"Classification report:[^\n]*\n((?:.*\n)+?)(?:\s*\n|\Z)"
+    report_blocks = re.findall(report_pattern, log_content, re.DOTALL)
     
     if debug:
-        print("Found {0} reports matching classes 0, 12, 99 pattern".format(len(matches_0_12_99)))
+        print(f"Found {len(report_blocks)} classification report blocks")
+        if report_blocks and debug:
+            print(f"\nFirst report block sample:")
+            print(report_blocks[0][:200])
     
-    if matches_0_12_99:
-        parsed_reports = []
-        for i, match in enumerate(matches_0_12_99):
-            # Extract context information (simple approach)
-            iteration = "unknown"
-            stage = "unknown"
-            
-            # Add class metrics (simplified)
-            for class_idx, class_name in enumerate(['0', '12', '99']):
-                idx = class_idx * 4  # 4 values per class
-                parsed_reports.append({
-                    'class': class_name,
-                    'precision': float(match[idx]),
-                    'recall': float(match[idx+1]),
-                    'f1-score': float(match[idx+2]),
-                    'support': int(match[idx+3]),
-                    'iteration': iteration,
-                    'stage': stage,
-                    'report_index': i
-                })
-            
-            # Add summary metrics
-            # Accuracy
-            parsed_reports.append({
-                'class': 'accuracy',
-                'precision': None, 
-                'recall': None,
-                'f1-score': float(match[12]),
-                'support': int(match[13]),
-                'iteration': iteration, 
-                'stage': stage,
-                'report_index': i
-            })
-            
-            # Macro avg
-            parsed_reports.append({
-                'class': 'macro avg',
-                'precision': float(match[14]),
-                'recall': float(match[15]),
-                'f1-score': float(match[16]),
-                'support': int(match[17]),
-                'iteration': iteration,
-                'stage': stage, 
-                'report_index': i
-            })
-            
-            # Weighted avg
-            parsed_reports.append({
-                'class': 'weighted avg',
-                'precision': float(match[18]),
-                'recall': float(match[19]),
-                'f1-score': float(match[20]),
-                'support': int(match[21]),
-                'iteration': iteration,
-                'stage': stage,
-                'report_index': i
-            })
-        
-        return parsed_reports
+    if not report_blocks:
+        # Try another pattern that's more permissive
+        report_pattern_alt = r"Classification report:.*?precision.*?recall.*?f1-score.*?support.*?((?:\s*\d+.*\n)+).*?accuracy.*\n.*?macro avg.*\n.*?weighted avg"
+        report_blocks = re.findall(report_pattern_alt, log_content, re.DOTALL)
+        if debug:
+            print(f"Found {len(report_blocks)} classification report blocks with alternative pattern")
+            if report_blocks:
+                print(f"\nFirst alt report block sample:")
+                print(report_blocks[0][:200])
+                
+        if not report_blocks:
+            # Try an even more permissive pattern - just get chunks after "Classification report:"
+            alt_pattern_2 = r"Classification report:(.*?)(?=Classification report:|$)"
+            report_chunks = re.findall(alt_pattern_2, log_content, re.DOTALL)
+            if debug:
+                print(f"Found {len(report_chunks)} raw classification report chunks")
+                
+            # Process these chunks to find patterns within them
+            for i, chunk in enumerate(report_chunks[:3]):  # Process first 3 chunks
+                if debug:
+                    print(f"\nRaw chunk {i+1} (first 200 chars):")
+                    print(chunk[:200].replace('\n', ' '))
+                    
+                # Try to extract just the part with class numbers and metrics
+                metrics_part = re.search(r"precision.*?recall.*?f1-score.*?support.*?((?:\s*\d+.*\n)+)", chunk, re.DOTALL)
+                if metrics_part:
+                    report_blocks.append(metrics_part.group(1))
+                    if debug:
+                        print(f"Extracted metrics part from chunk {i+1}")
     
-    # As a last resort, try a very simple approach
-    if debug:
-        print("\nTrying a basic approach to extract metrics directly...")
-    
-    # Look for lines with the class labels and metrics
-    class_0_pattern = r"\s*0\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)"
-    class_12_pattern = r"\s*12\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)"
-    class_99_pattern = r"\s*99\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)"
-    
-    class_0_matches = re.findall(class_0_pattern, log_content)
-    class_12_matches = re.findall(class_12_pattern, log_content) 
-    class_99_matches = re.findall(class_99_pattern, log_content)
-    
-    if debug:
-        print("Found direct matches for classes: 0:{0}, 12:{1}, 99:{2}".format(
-            len(class_0_matches), len(class_12_matches), len(class_99_matches)))
-    
-    # If we have matches for all classes
-    min_matches = min(len(class_0_matches), len(class_12_matches), len(class_99_matches))
-    if min_matches > 0:
-        basic_reports = []
-        for i in range(min_matches):
-            # Add each class
-            basic_reports.append({
-                'class': '0',
-                'precision': float(class_0_matches[i][0]),
-                'recall': float(class_0_matches[i][1]), 
-                'f1-score': float(class_0_matches[i][2]),
-                'support': int(class_0_matches[i][3]),
-                'iteration': 'unknown',
-                'stage': 'unknown',
-                'report_index': i
-            })
-            
-            basic_reports.append({
-                'class': '12',
-                'precision': float(class_12_matches[i][0]),
-                'recall': float(class_12_matches[i][1]),
-                'f1-score': float(class_12_matches[i][2]),
-                'support': int(class_12_matches[i][3]),
-                'iteration': 'unknown',
-                'stage': 'unknown',
-                'report_index': i
-            })
-            
-            basic_reports.append({
-                'class': '99',
-                'precision': float(class_99_matches[i][0]),
-                'recall': float(class_99_matches[i][1]),
-                'f1-score': float(class_99_matches[i][2]), 
-                'support': int(class_99_matches[i][3]),
-                'iteration': 'unknown',
-                'stage': 'unknown',
-                'report_index': i
-            })
-        
-        return basic_reports
-            
-    # If all else fails, try the general approach
-    if debug:
-        print("\nAll specific approaches failed. Trying generic approach...")
-    
-    # Try multiple patterns to match classification reports
-    # Pattern 1: Standard format with newlines
-    report_pattern1 = r"Classification report:\s*\n(.*?)(?=\n\n|\Z)"
-    # Pattern 2: More flexible spacing
-    report_pattern2 = r"Classification report:[ \t]*(.*?)(?=\n\n|\Z)"
-    # Pattern 3: Match anything after "Classification report:" until we hit a blank line
-    report_pattern3 = r"Classification report:[^\n]*\n((?:.*\n)+?)(?:\s*\n|\Z)"
-    
-    all_patterns = [report_pattern1, report_pattern2, report_pattern3]
-    
-    all_reports = []
-    for i, pattern in enumerate(all_patterns):
-        reports = re.findall(pattern, log_content, re.DOTALL | re.IGNORECASE)
-        if reports:
-            print("Found {0} reports using pattern {1}".format(len(reports), i+1))
-            all_reports.extend(reports)
-            # If we found reports, no need to try other patterns
-            break
-    
-    if not all_reports:
-        print("WARNING: Could not extract any classification reports with any pattern.")
-        # Try to find if there's any content that looks like a classification report
-        # Look for lines with precision, recall and f1-score
-        possible_reports = re.findall(r"(precision\s+recall\s+f1-score.*(?:\n.*){3,15})", log_content, re.DOTALL | re.IGNORECASE)
-        if possible_reports:
-            print("Found {0} possible report-like sections by looking for precision/recall headers.".format(len(possible_reports)))
-            # Use these as fallback
-            all_reports = possible_reports
-    
-    # Parse each report
     parsed_reports = []
-    for i, report in enumerate(all_reports):
+    for i, report_block in enumerate(report_blocks):
         try:
-            # For debugging
-            if debug and i < 2:  # Just show the first two reports
-                print("\nReport {0}:\n{1}".format(i+1, report))
-            
-            # Extract the stage/iteration information from nearby lines
-            # Look for context within 1000 characters before the report
-            report_start_idx = log_content.find(report)
+            # Extract context information
+            report_start_idx = log_content.find(report_block)
             if report_start_idx >= 0:
                 context_start = max(0, report_start_idx - 1000)
                 context_before = log_content[context_start:report_start_idx]
             else:
-                # If we can't find the exact position (unlikely), just use a split approach
-                context_before = log_content.split("Classification report:")[0][-1000:]
+                context_before = ""
             
             # Look for stage and iteration information
             iteration_match = re.search(r"Iteration (\d+)/\d+", context_before)
@@ -468,26 +365,64 @@ def find_and_extract_reports(log_file_path, debug=False):
                 elif "STAGE 2: Fine-tuning on possum disease data" in context_before:
                     stage = "possum"
             
-            # Parse the report
-            parsed_report = parse_classification_report(report)
+            # Use the parse_classification_report function
+            report_data = parse_classification_report(report_block)
             
-            # Add stage/iteration information to each row
-            for row in parsed_report:
+            if debug and i < 2 and report_data:
+                print(f"Report {i+1}: Parsed {len(report_data)} metrics rows")
+                if report_data:
+                    print(f"First row: {report_data[0]}")
+            
+            # Add metadata to each row
+            for row in report_data:
                 row['iteration'] = iteration
                 row['stage'] = stage
                 row['report_index'] = i
+                if identifier:
+                    row['identifier'] = identifier
             
-            parsed_reports.extend(parsed_report)
+            parsed_reports.extend(report_data)
+            
         except Exception as e:
-            print("Error parsing report {0}: {1}".format(i, e))
             if debug:
-                print("Problematic report content:\n{0}".format(report[:200]))
+                print(f"Error parsing report block {i}: {e}")
+                print(f"Report content: {report_block[:200]}...")
             continue
+    
+    # If we still have no results, try direct pattern matching for class lines
+    if not parsed_reports and debug:
+        print("\nTrying direct pattern matching for class metrics lines...")
+        
+        # Try to find direct matches for class metrics lines
+        class_pattern = r"\s*(\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+)"
+        class_matches = re.findall(class_pattern, log_content)
+        
+        if debug:
+            print(f"Found {len(class_matches)} direct class metric matches")
+            if class_matches:
+                print(f"First match: {class_matches[0]}")
+        
+        # If we found direct matches, convert them to reports
+        if class_matches:
+            for i, match in enumerate(class_matches):
+                class_name, precision, recall, f1_score, support = match
+                parsed_reports.append({
+                    'class': class_name,
+                    'precision': float(precision),
+                    'recall': float(recall),
+                    'f1-score': float(f1_score),
+                    'support': int(support),
+                    'iteration': 'unknown',
+                    'stage': 'unknown',
+                    'report_index': i // 3  # Group every 3 classes as one report (heuristic)
+                })
+                if identifier:
+                    parsed_reports[-1]['identifier'] = identifier
     
     return parsed_reports
 
 
-def export_reports_to_csv(parsed_reports, output_dir, prefix="classification_reports"):
+def export_reports_to_csv(parsed_reports, output_dir, prefix="classification_reports", identifier=None):
     """Export the parsed reports to CSV files."""
     if not parsed_reports:
         print("No reports found to export.")
@@ -499,8 +434,13 @@ def export_reports_to_csv(parsed_reports, output_dir, prefix="classification_rep
     # Convert to DataFrame
     df = pd.DataFrame(parsed_reports)
     
+    # Construct filename prefix with identifier if provided
+    file_prefix = prefix
+    if identifier:
+        file_prefix = f"{prefix}_{identifier}"
+    
     # Save all reports to a single CSV
-    all_reports_path = os.path.join(output_dir, "{0}_all.csv".format(prefix))
+    all_reports_path = os.path.join(output_dir, "{0}_all.csv".format(file_prefix))
     df.to_csv(all_reports_path, index=False)
     print("Exported all classification reports to: {0}".format(all_reports_path))
     
@@ -511,11 +451,11 @@ def export_reports_to_csv(parsed_reports, output_dir, prefix="classification_rep
         if iteration == "unknown" and stage == "unknown":
             continue
             
-        # Create filename - replace f-string with format()
+        # Create filename including identifier if provided
         if iteration != "unknown":
-            filename = "{0}_iteration_{1}_stage_{2}.csv".format(prefix, iteration, stage)
+            filename = "{0}_iteration_{1}_stage_{2}.csv".format(file_prefix, iteration, stage)
         else:
-            filename = "{0}_stage_{1}.csv".format(prefix, stage)
+            filename = "{0}_stage_{1}.csv".format(file_prefix, stage)
         
         # Export CSV
         csv_path = os.path.join(output_dir, filename)
@@ -523,45 +463,7 @@ def export_reports_to_csv(parsed_reports, output_dir, prefix="classification_rep
         print("Exported report for iteration {0}, stage {1} to: {2}".format(
             iteration, stage, csv_path))
     
-    # Also create a summary DataFrame with key metrics
-    if 'class' in df.columns and 'f1-score' in df.columns:
-        try:
-            # Get metrics for each report (identified by report_index)
-            summaries = []
-            for idx, group in df.groupby('report_index'):
-                # Create summary row
-                summary = {
-                    'iteration': group['iteration'].iloc[0],
-                    'stage': group['stage'].iloc[0],
-                    'report_index': idx
-                }
-                
-                # Add metrics for each class
-                for _, row in group.iterrows():
-                    class_name = row['class']
-                    if class_name in ['0', '12', '99']:
-                        class_prefix = "class_{0}_".format(class_name)
-                    else:
-                        class_prefix = "{0}_".format(class_name.replace(' ', '_'))
-                    
-                    # Add precision, recall, f1-score for this class
-                    if row['precision'] is not None:
-                        summary[class_prefix + 'precision'] = row['precision']
-                    if row['recall'] is not None:
-                        summary[class_prefix + 'recall'] = row['recall']
-                    summary[class_prefix + 'f1-score'] = row['f1-score']
-                    summary[class_prefix + 'support'] = row['support']
-                
-                summaries.append(summary)
-            
-            # Create and save summary DataFrame
-            if summaries:
-                summary_df = pd.DataFrame(summaries)
-                summary_path = os.path.join(output_dir, "{0}_summary.csv".format(prefix))
-                summary_df.to_csv(summary_path, index=False)
-                print("Exported summary metrics to: {0}".format(summary_path))
-        except Exception as e:
-            print("Error creating summary DataFrame: {0}".format(e))
+    # Summary creation has been removed as requested
     
     return all_reports_path
 
@@ -574,6 +476,8 @@ def main():
                         help='Directory to save the extracted reports (default: classification_reports)')
     parser.add_argument('--prefix', type=str, default='classification_report',
                         help='Prefix for the CSV filenames (default: classification_report)')
+    parser.add_argument('--identifier', type=str, 
+                        help='Identifier to add as a column in CSV output and include in filenames')
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug mode to print additional information')
     
@@ -589,7 +493,7 @@ def main():
         if not os.path.exists(args.log_file):
             parser.error("Log file not found: {0}".format(args.log_file))
         print("Processing log file: {0}".format(args.log_file))
-        parsed_reports = find_and_extract_reports(args.log_file, debug=args.debug)
+        parsed_reports = find_and_extract_reports(args.log_file, debug=args.debug, identifier=args.identifier)
         all_parsed_reports.extend(parsed_reports)
     
     # Process all log files in directory
@@ -598,18 +502,30 @@ def main():
             parser.error("Log directory not found: {0}".format(args.log_dir))
         
         log_files = glob.glob(os.path.join(args.log_dir, "*.log")) + glob.glob(os.path.join(args.log_dir, "*.txt"))
+        # Also look for files without extension (like HPC output files)
+        for f in os.listdir(args.log_dir):
+            path = os.path.join(args.log_dir, f)
+            if os.path.isfile(path) and '.' not in f:
+                log_files.append(path)
+                
         if not log_files:
             parser.error("No log files found in directory: {0}".format(args.log_dir))
         
         for log_file in log_files:
             print("Processing log file: {0}".format(log_file))
-            parsed_reports = find_and_extract_reports(log_file, debug=args.debug)
-            all_parsed_reports.extend(parsed_reports)
+            parsed_reports = find_and_extract_reports(log_file, debug=args.debug, identifier=args.identifier)
+            if parsed_reports:
+                all_parsed_reports.extend(parsed_reports)
+                # Use the filename as identifier if none is provided
+                if args.identifier is None:
+                    file_identifier = os.path.basename(log_file)
+                    for report in parsed_reports:
+                        report['file_source'] = file_identifier
     
     # Export all parsed reports
     if all_parsed_reports:
         print("Found {0} report entries in total".format(len(all_parsed_reports)))
-        export_reports_to_csv(all_parsed_reports, args.output_dir, args.prefix)
+        export_reports_to_csv(all_parsed_reports, args.output_dir, args.prefix, args.identifier)
     else:
         print("No classification reports found in the provided log file(s)")
 
