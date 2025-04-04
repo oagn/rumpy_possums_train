@@ -35,7 +35,7 @@ FROZ_EPOCH: 10 # Number of epochs to train the frozen model
 
 BUF: 1 # Blocks to unfreeze for fine-tuning 
 PROG_STAGE_LEN: 7  # Number of progressive fine-tuning epochs 
-PROG_TOT_EPOCH: 15 # Total number of epochs required
+PROG_TOT_EPOCH: 28 # Total number of epochs required (4 stages * 7 epochs = 28)
 
 # Regularisation/augmentation progression
 MAGNITUDES:

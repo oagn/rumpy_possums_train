@@ -68,10 +68,16 @@ def train_wildlife_model(config, strategy):
         frozen_hist, model = fit_frozen(config, model, train_df, val_df, num_classes, df_size, img_size)
     model.summary()
     
+    # Calculate total epochs needed for progressive training
+    stages = len(config['MAGNITUDES'])
+    prog_stage_len = config['PROG_STAGE_LEN']
+    total_epochs = max(config['PROG_TOT_EPOCH'], stages * prog_stage_len)
+    
     # Create datasets for progressive training
     print('\nCreating datasets for progressive training...')
     prog_train = []
-    for i in range(config['PROG_TOT_EPOCH']):
+    # Create the correct number of datasets based on total_epochs rather than PROG_TOT_EPOCH
+    for i in range(total_epochs):
         train_tmp, _ = create_train(
             config['TRAIN_PATH'],
             seed=(config['SEED']+i),
@@ -114,8 +120,12 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     """Fine-tune the wildlife model on possum disease data"""
     print("\n===== STAGE 2: Fine-tuning on possum disease data =====")
     
-    # Setup paths with finetuned-specific name
-    finetuned_savefile = f"{config['SAVEFILE']}_frozen_finetuned"  # Changed to include "frozen" in the name
+    # Get model source from environment variable (default to "wildlife" if not set)
+    model_source = os.environ.get("MODEL_SOURCE", "wildlife")
+    print(f"\nModel source: {model_source}")
+    
+    # Setup paths with appropriate naming based on model source
+    finetuned_savefile = f"{config['SAVEFILE']}_{model_source}_frozen_finetuned"
     output_fpath = os.path.join(config['OUTPUT_PATH'], finetuned_savefile, config['MODEL'])
     ensure_output_directory(output_fpath)
     
@@ -252,10 +262,16 @@ def finetune_on_possum(config, wildlife_model_path, img_size, strategy):
     
     model.summary()
     
+    # Calculate total epochs needed for progressive training
+    stages = len(possum_config['MAGNITUDES'])
+    prog_stage_len = possum_config['PROG_STAGE_LEN']
+    total_epochs = max(possum_config['PROG_TOT_EPOCH'], stages * prog_stage_len)
+    
     # Create datasets for progressive training
     print('\nCreating datasets for progressive training...')
     prog_train = []
-    for i in range(possum_config['PROG_TOT_EPOCH']):
+    # Create the correct number of datasets based on total_epochs rather than PROG_TOT_EPOCH
+    for i in range(total_epochs):
         train_tmp, _ = create_train(
             possum_config['TRAIN_PATH'],
             seed=(config['SEED']+i),
@@ -521,9 +537,28 @@ def main():
             # Since we don't have possum_classes from earlier stages, load them from the model directory
             try:
                 model_dir = os.path.dirname(possum_model_path)
-                class_map_file = os.path.join(model_dir, config['SAVEFILE'] + '_class_map.yaml')
-                with open(class_map_file, 'r') as file:
-                    class_map = yaml.safe_load(file)
+                # Extract the base name from the model path (expected format: .../savefile_model.keras)
+                model_filename = os.path.basename(possum_model_path)
+                base_savefile = model_filename.split('_')[0]
+                
+                # Try multiple possible class map filenames
+                possible_class_maps = [
+                    os.path.join(model_dir, f"{base_savefile}_class_map.yaml"),
+                    os.path.join(model_dir, config['SAVEFILE'] + '_class_map.yaml'),
+                    os.path.join(model_dir, "class_map.yaml")
+                ]
+                
+                class_map = None
+                for class_map_file in possible_class_maps:
+                    if os.path.exists(class_map_file):
+                        print(f"Found class map file: {class_map_file}")
+                        with open(class_map_file, 'r') as file:
+                            class_map = yaml.safe_load(file)
+                        break
+                
+                if class_map is None:
+                    raise FileNotFoundError(f"Could not find class map file in {model_dir}")
+                    
                 possum_classes = list(class_map.keys())
             except Exception as e:
                 print(f"Error loading class map: {e}")

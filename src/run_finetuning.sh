@@ -36,18 +36,18 @@ env
 
 # Default values
 USE_WILDLIFE=true
-OUTPUT_DIR_SUFFIX=""
+MODEL_SOURCE="wildlife"
 
 # Parse command line arguments
 while getopts "wih" opt; do
   case $opt in
     w)
       USE_WILDLIFE=true
-      OUTPUT_DIR_SUFFIX="_wildlife_frozen_finetuned"
+      MODEL_SOURCE="wildlife"
       ;;
     i)
       USE_WILDLIFE=false
-      OUTPUT_DIR_SUFFIX="_imagenet_frozen_finetuned"
+      MODEL_SOURCE="imagenet"
       ;;
     h)
       echo "Usage: $0 [-w] [-i] [-h]"
@@ -75,11 +75,6 @@ echo "Copying src folder from ${input_dir} to ${WDPATH}"
 mkdir -p ${WDPATH}/src
 cp -r ${input_dir}/src/* ${WDPATH}/src/
 
-# Create output directory with appropriate suffix
-OUTPUT_DIR="/scratch/$USER/output/possum_disease${OUTPUT_DIR_SUFFIX}"
-mkdir -p ${OUTPUT_DIR}
-echo "Output will be saved to: ${OUTPUT_DIR}"
-
 # List the contents to verify
 echo "Contents of src directory:"
 ls -la ${WDPATH}/src
@@ -99,9 +94,8 @@ export XLA_FLAGS="--xla_gpu_cuda_data_dir=/apps/languages/cuda/11.7.0"
 # Limit JAX to use only one GPU
 export CUDA_VISIBLE_DEVICES=0
 
-# Modify the config file to update the output path
+# Config file location
 CONFIG_FILE="${WDPATH}/src/possum_config.yaml"
-sed -i "s|OUTPUT_PATH:.*|OUTPUT_PATH: '${OUTPUT_DIR}'|" ${CONFIG_FILE}
 
 # Define path to pre-trained wildlife model
 WILDLIFE_MODEL="/scratch/$USER/output/rumpy_possum_train/possum_disease_wildlife/ENS/possum_disease_wildlife_ENS.keras"
@@ -111,14 +105,12 @@ start="$(date +%s)"
 
 if $USE_WILDLIFE; then
     echo "Starting fine-tuning from wildlife model: ${WILDLIFE_MODEL}"
-    # Run stage 2 (fine-tuning) with wildlife model
-    time conda run -n keras-jax python src/possum_pipeline.py --config ${CONFIG_FILE} --stage 2 --wildlife_model ${WILDLIFE_MODEL}
+    # Run stage 2 (fine-tuning) with wildlife model, passing model source as an environment variable
+    MODEL_SOURCE=${MODEL_SOURCE} time conda run -n keras-jax python src/possum_pipeline.py --config ${CONFIG_FILE} --stage 2 --wildlife_model ${WILDLIFE_MODEL}
 else
     echo "Starting fine-tuning from ImageNet weights"
     # Run stage 2 (fine-tuning) with ImageNet weights (by not providing a wildlife model)
-    # First modify the SAVEFILE to include 'imagenet' in the name
-    sed -i "s|SAVEFILE:.*|SAVEFILE: 'possum_disease_imagenet'|" ${CONFIG_FILE}
-    time conda run -n keras-jax python src/possum_pipeline.py --config ${CONFIG_FILE} --stage 2
+    MODEL_SOURCE=${MODEL_SOURCE} time conda run -n keras-jax python src/possum_pipeline.py --config ${CONFIG_FILE} --stage 2
 fi
 
 stop="$(date +%s)"
