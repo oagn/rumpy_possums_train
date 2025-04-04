@@ -106,10 +106,12 @@ start="$(date +%s)"
 if $USE_WILDLIFE; then
     echo "Starting fine-tuning from wildlife model: ${WILDLIFE_MODEL}"
     # Run stage 2 (fine-tuning) with wildlife model, passing model source as an environment variable
+    # The --stage 2 argument specifies to only run the fine-tuning step without continuing to pseudo-labeling
     MODEL_SOURCE=${MODEL_SOURCE} time conda run -n keras-jax python src/possum_pipeline.py --config ${CONFIG_FILE} --stage 2 --wildlife_model ${WILDLIFE_MODEL}
 else
     echo "Starting fine-tuning from ImageNet weights"
     # Run stage 2 (fine-tuning) with ImageNet weights (by not providing a wildlife model)
+    # The --stage 2 argument specifies to only run the fine-tuning step without continuing to pseudo-labeling
     MODEL_SOURCE=${MODEL_SOURCE} time conda run -n keras-jax python src/possum_pipeline.py --config ${CONFIG_FILE} --stage 2
 fi
 

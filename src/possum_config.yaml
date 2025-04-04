@@ -21,7 +21,9 @@ POSSUM_VAL_PATH: '/scratch/c.c1767198/data/possums/near_dupe_sorted/validate'
 UNLABELED_POSSUM_PATH: '/scratch/c.c1767198/data/possums/unlabeled_possums'
 
 # Pseudo-labeling settings
-PSEUDO_LABEL_CONFIDENCE: 0.99 # Minimum confidence threshold for accepting pseudo-labels
+PSEUDO_LABEL_CONFIDENCE: 0.75 # Base confidence threshold for accepting pseudo-labels
+CURRICULUM_STAGES: 3 # Number of curriculum learning stages
+CURRICULUM_CONFIDENCE_RANGE: 0.2 # Range of confidence thresholds (highest = base + range/2, lowest = base - range/2)
 
 # Training hyperparameters
 OPTIMIZER: 'adamw' 
