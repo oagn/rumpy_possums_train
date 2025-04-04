@@ -340,8 +340,42 @@ def calc_class_metrics(model_fpath, test_fpath, output_fpath, classes, batch_siz
 def save_training_history(histories, output_path, model_name):
     """Save training metrics to a CSV file for later analysis"""
     
-    # Convert history dictionary to DataFrame
-    history_df = pd.DataFrame(histories)
+    # Initialize lists to store the metrics
+    all_epochs = []
+    all_loss = []
+    all_accuracy = []
+    all_val_loss = []
+    all_val_accuracy = []
+    
+    # Extract data from each History object
+    current_epoch = 0
+    for i, history in enumerate(histories):
+        # Each history object is for a single epoch in our implementation
+        metrics_dict = history.history
+        
+        # Extract metrics, handling the case when a metric might be missing
+        loss = metrics_dict.get('loss', [None])
+        accuracy = metrics_dict.get('accuracy', [None])
+        val_loss = metrics_dict.get('val_loss', [None])
+        val_accuracy = metrics_dict.get('val_accuracy', [None])
+        
+        # Append the metrics for this epoch
+        all_epochs.append(current_epoch + 1)
+        all_loss.append(loss[0])
+        all_accuracy.append(accuracy[0])
+        all_val_loss.append(val_loss[0])
+        all_val_accuracy.append(val_accuracy[0])
+        
+        current_epoch += 1
+    
+    # Create a DataFrame with the extracted metrics
+    history_df = pd.DataFrame({
+        'epoch': all_epochs,
+        'loss': all_loss,
+        'accuracy': all_accuracy,
+        'val_loss': all_val_loss,
+        'val_accuracy': all_val_accuracy
+    })
     
     # Save to CSV
     csv_path = os.path.join(output_path, f"{model_name}_training_history.csv")
