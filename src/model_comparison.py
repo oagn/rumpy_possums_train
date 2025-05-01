@@ -48,6 +48,7 @@ def load_model_safely(model_path):
     try:
         # Try to load the model with custom objects
         model = models.load_model(model_path, custom_objects=custom_objects, compile=False)
+        model = model.trainable = False
         print("Model loaded successfully with custom objects")
     except Exception as e:
         print(f"Error loading model: {e}")
