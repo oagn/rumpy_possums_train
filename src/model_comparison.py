@@ -11,7 +11,7 @@ from sklearn.metrics import (
     precision_recall_curve, auc, accuracy_score,
     precision_score, recall_score, f1_score
 )
-from scipy.stats import mcnemar
+from statsmodels.stats.contingency_tables import mcnemar
 import seaborn as sns
 import yaml
 import argparse
