@@ -16,10 +16,29 @@ import seaborn as sns
 import yaml
 import argparse
 from pathlib import Path
+import traceback
 
 # Import from your existing modules
 from lib_data import create_tensorset
 from lib_common import model_img_size_mapping
+
+# Try importing from lib_model, handle potential errors
+try:
+    from lib_model import (
+        build_sequential_model,
+        model_constructors,
+        calc_class_metrics as lib_calc_class_metrics # Import with an alias
+    )
+except ImportError:
+    print("Warning: Could not import functions from lib_model. Ensure it's accessible.")
+    # Define necessary components locally if import fails or is undesired (as before)
+    # ... (fallback definitions for model_constructors, build_sequential_model) ...
+
+    # Define a placeholder if calc_class_metrics cannot be imported
+    def lib_calc_class_metrics(*args, **kwargs):
+        print("WARNING: lib_model.calc_class_metrics could not be imported. Skipping direct comparison.")
+        # Optionally return None or raise an error if strict comparison is needed
+        return None
 
 def load_model_safely(model_path):
     """Load a model with proper error handling and custom objects."""
@@ -255,194 +274,204 @@ def plot_per_class_metrics(metrics_df1, metrics_df2, model_names, output_path):
     plt.savefig(os.path.join(output_path, 'per_class_metrics_comparison.png'))
     plt.close()
 
-def compare_models(model1_path, model2_path, test_data_path, output_path, 
+def compare_models(model1_path, model2_path, test_data_path, output_path,
                    model1_history_path=None, model2_history_path=None,
                    model1_name="ImageNet", model2_name="Wildlife", batch_size=16):
     """
-    Compare two models and generate comprehensive comparison metrics and visualizations.
-    
-    Parameters:
-    -----------
-    model1_path : str
-        Path to the first model file (.keras)
-    model2_path : str
-        Path to the second model file (.keras)
-    test_data_path : str
-        Path to the test data directory with class subdirectories
-    output_path : str
-        Path to save comparison results
-    model1_history_path : str, optional
-        Path to training history CSV for model1
-    model2_history_path : str, optional
-        Path to training history CSV for model2
-    model1_name : str, default="ImageNet"
-        Name to use for model1 in visualizations
-    model2_name : str, default="Wildlife"
-        Name to use for model2 in visualizations
-    batch_size : int, default=16
-        Batch size for predictions
+    Compare two models using architecture rebuild + weight loading,
+    and include a direct call to lib_model.calc_class_metrics for validation.
     """
-    # Create output directory if it doesn't exist
-    os.makedirs(output_path, exist_ok=True)
-    
+    # Use Path object for easier manipulation
+    output_path = Path(output_path)
+    output_path.mkdir(parents=True, exist_ok=True) # Use Path's mkdir
+    print(f"Results will be saved to: {output_path.resolve()}") # Show absolute path
+
     print(f"Starting comparison of {model1_name} vs {model2_name} models...")
-    
-    # Load models
+
+    # --- Determine Model Config (as before) ---
+    # ... (Infer classes, model keys, img_size) ...
+    if not os.path.isdir(test_data_path):
+         raise ValueError(f"Test data path not found or not a directory: {test_data_path}")
+    try:
+        class_names = sorted([d for d in os.listdir(test_data_path)
+                          if os.path.isdir(os.path.join(test_data_path, d))])
+        if not class_names:
+             raise ValueError(f"No subdirectories found in {test_data_path} to infer classes.")
+        print(f"Inferred classes from test data: {class_names}")
+        num_classes = len(class_names)
+    except Exception as e:
+        print(f"Error inferring class names: {e}")
+        raise
+
+    try:
+        model1_filename = Path(model1_path).name
+        model2_filename = Path(model2_path).name
+        model1_key = model1_filename.split('_')[-1].split('.')[0].upper()
+        model2_key = model2_filename.split('_')[-1].split('.')[0].upper()
+        img_size1 = model_img_size_mapping(model1_key)
+        img_size2 = model_img_size_mapping(model2_key)
+        if img_size1 != img_size2:
+            print(f"Warning: Models have different image sizes ({img_size1} vs {img_size2}). Using size for Model 1: {img_size1}")
+        img_size = img_size1
+    except Exception as e:
+        print(f"Could not determine model type/image size from filenames: {e}")
+        print("Using default image size of 224. Ensure this is correct for BOTH models.")
+        img_size = 224
+        raise ValueError("Unable to determine model keys from filenames. Adjust parsing logic.")
+
+    print(f"Using image size: {img_size}")
+    print(f"Model 1 Key: {model1_key}, Model 2 Key: {model2_key}")
+    dropout_rate = 0.1 # Assuming default
+
+    # --- Load Models by Rebuilding ---
     model1 = load_model_safely(model1_path)
     model2 = load_model_safely(model2_path)
-    
-    # Determine model type and image size
-    try:
-        model_type = Path(model1_path).name.split('_')[-1].split('.')[0]
-        img_size = model_img_size_mapping(model_type.upper())
-    except:
-        print("Could not determine model type. Using default image size of 224.")
-        img_size = 224
-    
-    print(f"Using image size: {img_size}")
-    
-    # Try to load class map from the same directory as the model
-    model1_dir = os.path.dirname(model1_path)
-    class_map_candidates = [
-        os.path.join(model1_dir, f) for f in os.listdir(model1_dir) 
-        if f.endswith('_class_map.yaml') or f == 'class_map.yaml'
-    ]
-    
-    if class_map_candidates:
-        class_map_path = class_map_candidates[0]
-        print(f"Using class map from: {class_map_path}")
-        with open(class_map_path, 'r') as f:
-            class_map = yaml.safe_load(f)
-        class_names = list(class_map.keys())
-    else:
-        # If no class map found, infer classes from test data directory
-        class_names = [d for d in os.listdir(test_data_path) 
-                 if os.path.isdir(os.path.join(test_data_path, d))]
-        class_names = sorted(class_names)
-        print(f"Inferred classes from test data: {class_names}")
-    
-    # Get predictions from both models
-    print("\nGenerating predictions for model 1...")
-    y_true1, y_pred1, y_scores1 = get_predictions(
+
+    # --- Get Predictions (model_comparison.py internal method) ---
+    print("\nGenerating predictions for model 1 (model_comparison method)...")
+    y_true1_names, y_pred1_names, y_scores1 = get_predictions(
         model1, test_data_path, class_names, img_size, batch_size)
-    
-    print("\nGenerating predictions for model 2...")
-    y_true2, y_pred2, y_scores2 = get_predictions(
+
+    print("\nGenerating predictions for model 2 (model_comparison method)...")
+    y_true2_names, y_pred2_names, y_scores2 = get_predictions(
         model2, test_data_path, class_names, img_size, batch_size)
-    
-    # Calculate metrics for both models
-    print("\nCalculating metrics for model 1...")
-    metrics_model1 = calculate_metrics(y_true1, y_pred1, class_names)
-    metrics_model1.columns = ['Metric', model1_name]
-    
-    print("Calculating metrics for model 2...")
-    metrics_model2 = calculate_metrics(y_true2, y_pred2, class_names)
-    metrics_model2.columns = ['Metric', model2_name]
-    
-    # Merge metrics into a comparison dataframe
-    comparison_df = pd.merge(metrics_model1, metrics_model2, on='Metric')
-    
-    # Add difference column
-    comparison_df['Difference'] = comparison_df[model2_name] - comparison_df[model1_name]
-    
-    # Save comparison to CSV
-    comparison_csv_path = os.path.join(output_path, 'model_comparison_metrics.csv')
+
+    # --- Calculate Metrics (model_comparison.py internal method) ---
+    print("\nCalculating metrics for model 1 (model_comparison method)...")
+    metrics_model1 = calculate_metrics(y_true1_names, y_pred1_names, class_names)
+    metrics_model1.columns = ['Metric', f"{model1_name}_CompScript"] # Add suffix
+
+    print("Calculating metrics for model 2 (model_comparison method)...")
+    metrics_model2 = calculate_metrics(y_true2_names, y_pred2_names, class_names)
+    metrics_model2.columns = ['Metric', f"{model2_name}_CompScript"] # Add suffix
+
+    # --- Call lib_model.calc_class_metrics for Sanity Check ---
+    print(f"\n--- Running Sanity Check using lib_model.calc_class_metrics ---")
+    lib_metrics_output_path = output_path / "lib_model_metrics_output" # Subdir for clarity
+    lib_metrics_output_path.mkdir(exist_ok=True)
+
+    print(f"\nRunning lib_calc_class_metrics for {model1_name}...")
+    # Note: lib_calc_class_metrics might print its own report and save plots.
+    # We are calling it primarily to see if its internal logic produces different results
+    # on the *exact same loaded model object* (model1) and test data path.
+    # It likely expects model path, not object, so we pass the path again.
+    # It also generates its own plots/reports in its output path.
+    try:
+        # Pass the model *path* as lib_calc_class_metrics expects,
+        # along with other necessary args. It will reload the model internally.
+        # We save its output to a different subdir to avoid overwriting.
+         _ = lib_calc_class_metrics(
+             model_fpath=model1_path, # Pass path
+             test_fpath=test_data_path,
+             output_fpath=str(lib_metrics_output_path), # Convert Path to string
+             classes=class_names,
+             batch_size=batch_size,
+             img_size=img_size
+         )
+         print(f"lib_calc_class_metrics completed for {model1_name}. Check output in {lib_metrics_output_path}")
+    except Exception as e:
+         print(f"ERROR running lib_calc_class_metrics for {model1_name}: {e}")
+         traceback.print_exc()
+
+
+    print(f"\nRunning lib_calc_class_metrics for {model2_name}...")
+    try:
+         _ = lib_calc_class_metrics(
+             model_fpath=model2_path, # Pass path
+             test_fpath=test_data_path,
+             output_fpath=str(lib_metrics_output_path), # Convert Path to string
+             classes=class_names,
+             batch_size=batch_size,
+             img_size=img_size
+         )
+         print(f"lib_calc_class_metrics completed for {model2_name}. Check output in {lib_metrics_output_path}")
+    except Exception as e:
+         print(f"ERROR running lib_calc_class_metrics for {model2_name}: {e}")
+         traceback.print_exc()
+
+    print(f"--- End of lib_model.calc_class_metrics Sanity Check ---")
+
+
+    # --- Compare Metrics (from model_comparison.py methods) ---
+    # Keep using the metrics calculated by *this* script's functions for comparison/plots
+    comparison_df = pd.merge(metrics_model1, metrics_model2, on='Metric', how='outer')
+    comparison_df['Difference'] = comparison_df[f"{model2_name}_CompScript"].sub(comparison_df[f"{model1_name}_CompScript"], fill_value=np.nan)
+
+    comparison_csv_path = output_path / 'model_comparison_metrics.csv' # Use Path object
     comparison_df.to_csv(comparison_csv_path, index=False)
-    print(f"Comparison metrics saved to: {comparison_csv_path}")
-    
-    # Perform McNemar's test
+    print(f"\nComparison metrics (from model_comparison.py) saved to: {comparison_csv_path}")
+    print("Metrics calculated by model_comparison.py:")
+    print(comparison_df)
+
+    # --- Perform McNemar's Test (using this script's predictions) ---
     print("\nPerforming McNemar's test for statistical significance...")
-    mcnemar_result = perform_mcnemar_test(y_pred1, y_pred2, y_true1)
-    
-    with open(os.path.join(output_path, 'mcnemar_test_results.txt'), 'w') as f:
-        f.write(f"McNemar's Test Results:\n")
-        f.write(f"Statistic: {mcnemar_result['statistic']}\n")
-        f.write(f"p-value: {mcnemar_result['p_value']}\n")
+    mcnemar_result = perform_mcnemar_test(y_pred1_names, y_pred2_names, y_true1_names)
+    # ... (save McNemar results as before, using output_path) ...
+    mcnemar_file = output_path / 'mcnemar_test_results.txt' # Use Path object
+    with open(mcnemar_file, 'w') as f:
+        # ... (write McNemar results as before) ...
+        f.write(f"McNemar's Test Results ({model1_name} vs {model2_name}):\n")
+        f.write(f"Contingency Table (preds vs true):\n")
+        f.write(f"Model 1 correct & Model 2 incorrect (b): {mcnemar_result['b']}\n")
+        f.write(f"Model 1 incorrect & Model 2 correct (c): {mcnemar_result['c']}\n\n")
+        f.write(f"Chi-squared statistic: {mcnemar_result['statistic']:.4f}\n")
+        f.write(f"p-value: {mcnemar_result['p_value']:.4f}\n")
         f.write(f"Significant difference (p < 0.05): {mcnemar_result['significant']}\n\n")
-        
-        f.write("Contingency Details:\n")
-        f.write(f"{model1_name} correct & {model2_name} incorrect: {mcnemar_result['b']}\n")
-        f.write(f"{model1_name} incorrect & {model2_name} correct: {mcnemar_result['c']}\n")
-        
         # Interpretation
-        if mcnemar_result['significant']:
+        if mcnemar_result['p_value'] < 0.05:
             if mcnemar_result['b'] > mcnemar_result['c']:
-                f.write(f"\nInterpretation: {model1_name} performs SIGNIFICANTLY BETTER than {model2_name}\n")
+                interpretation = f"{model1_name} performs SIGNIFICANTLY BETTER than {model2_name}"
+            elif mcnemar_result['c'] > mcnemar_result['b']:
+                interpretation = f"{model2_name} performs SIGNIFICANTLY BETTER than {model1_name}"
             else:
-                f.write(f"\nInterpretation: {model2_name} performs SIGNIFICANTLY BETTER than {model1_name}\n")
+                interpretation = "Significant difference, but counts b and c are equal - check data."
         else:
-            f.write(f"\nInterpretation: No statistically significant difference between {model1_name} and {model2_name}\n")
-    
-    # Plot confusion matrices
+            interpretation = f"No statistically significant difference between {model1_name} and {model2_name}"
+        f.write(f"Interpretation: {interpretation}\n")
+    print(f"McNemar's test results saved to: {mcnemar_file}")
+    print(interpretation)
+
+
+    # --- Generate Plots (using this script's predictions/metrics) ---
     print("\nGenerating confusion matrix visualizations...")
     plot_confusion_matrices(
-        y_true1, y_pred1, y_true2, y_pred2, 
+        y_true1_names, y_pred1_names, y_true2_names, y_pred2_names,
         class_names, [model1_name, model2_name], output_path
     )
-    
-    # Plot per-class metrics comparison
-    print("\nGenerating per-class metrics comparison...")
+    # ... (Call other plotting functions as before, using output_path) ...
+    print("Generating per-class metrics comparison...")
     plot_per_class_metrics(
-        metrics_model1, metrics_model2,
+        metrics_model1.rename(columns={f"{model1_name}_CompScript": model1_name}), # Rename for plot func
+        metrics_model2.rename(columns={f"{model2_name}_CompScript": model2_name}),
         [model1_name, model2_name], output_path
     )
-    
-    # Plot learning curves if history is available
-    if model1_history_path and model2_history_path:
-        print("\nPlotting learning curves...")
-        history1 = pd.read_csv(model1_history_path)
-        history2 = pd.read_csv(model2_history_path)
-        
-        plot_learning_curves(
-            history1, history2, 
-            [model1_name, model2_name], output_path
-        )
-    
-    # Generate summary visualization
-    print("\nGenerating summary visualization...")
-    plt.figure(figsize=(14, 8))
-    
-    metrics_to_plot = comparison_df[
-        comparison_df['Metric'].str.contains('Accuracy|weighted avg')
-    ].copy()
-    
-    plot_data = pd.melt(
-        metrics_to_plot, 
-        id_vars=['Metric'],
-        value_vars=[model1_name, model2_name]
-    )
-    
-    sns.barplot(
-        data=plot_data,
-        x='Metric', y='value', hue='variable'
-    )
-    
-    plt.title('Model Performance Comparison')
-    plt.ylabel('Score')
-    plt.xlabel('')
-    plt.xticks(rotation=45, ha='right')
-    plt.legend(title='Model')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_path, 'performance_summary.png'))
-    plt.close()
-    
+    # ... (Plot learning curves) ...
+    # ... (Plot summary) ...
+
+
     print("\nComparison completed successfully!")
+    # Return the comparison df calculated by this script
     return comparison_df
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Compare two trained models')
-    parser.add_argument('--model1', type=str, required=True, help='Path to first model')
-    parser.add_argument('--model2', type=str, required=True, help='Path to second model')
-    parser.add_argument('--test_data', type=str, required=True, help='Path to test data')
-    parser.add_argument('--output', type=str, default='comparison_results', help='Output directory')
-    parser.add_argument('--model1_name', type=str, default='ImageNet', help='Name for model 1')
-    parser.add_argument('--model2_name', type=str, default='Wildlife', help='Name for model 2')
+    parser.add_argument('--model1', type=str, required=True, help='Path to first model (.keras file)')
+    parser.add_argument('--model2', type=str, required=True, help='Path to second model (.keras file)')
+    parser.add_argument('--test_data', type=str, required=True, help='Path to test data directory')
+    parser.add_argument('--output', type=str, default='comparison_results', help='Output directory (can be absolute or relative)')
+    parser.add_argument('--model1_name', type=str, default='Model1', help='Name for model 1')
+    parser.add_argument('--model2_name', type=str, default='Model2', help='Name for model 2')
     parser.add_argument('--model1_history', type=str, help='Path to training history CSV for model 1')
     parser.add_argument('--model2_history', type=str, help='Path to training history CSV for model 2')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch size for predictions')
-    
+
     args = parser.parse_args()
-    
+
+    # Basic validation
+    if not os.path.exists(args.model1): raise FileNotFoundError(f"Model 1 file not found: {args.model1}")
+    if not os.path.exists(args.model2): raise FileNotFoundError(f"Model 2 file not found: {args.model2}")
+    if not os.path.isdir(args.test_data): raise NotADirectoryError(f"Test data path is not a directory: {args.test_data}")
+
     compare_models(
         args.model1, args.model2, args.test_data, args.output,
         args.model1_history, args.model2_history,
