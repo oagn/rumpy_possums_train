@@ -60,7 +60,7 @@ def load_model_safely(model_path):
         except Exception as e2:
             print(f"TensorFlow loading also failed: {e2}")
             raise ValueError(f"Unable to load model from {model_path}")
-    model = model.trainable = False
+    model.trainable = False
     
     return model
 
