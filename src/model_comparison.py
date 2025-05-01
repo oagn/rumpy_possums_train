@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow.keras import models
+from tensorflow.keras import models, layers
 import kimm
 from sklearn.metrics import (
     classification_report, confusion_matrix, roc_curve, 
@@ -163,33 +163,110 @@ def calculate_metrics(y_true, y_pred, classes):
     return pd.DataFrame(metrics_data)
 
 def perform_mcnemar_test(y_pred_model1, y_pred_model2, y_true):
-    """Perform McNemar's test to check if the difference between models is statistically significant."""
-    # Convert to numpy arrays if they're not already
-    y_pred_model1 = np.array(y_pred_model1)
-    y_pred_model2 = np.array(y_pred_model2)
-    y_true = np.array(y_true)
-    
-    # Create contingency table
-    correct_model1 = (y_pred_model1 == y_true)
-    correct_model2 = (y_pred_model2 == y_true)
-    
-    # Contingency table
-    b = np.sum(correct_model1 & ~correct_model2)  # model1 correct, model2 wrong
-    c = np.sum(~correct_model1 & correct_model2)  # model1 wrong, model2 correct
-    
-    # McNemar's test statistic and p-value
-    statistic = ((b - c)**2) / (b + c) if (b + c) > 0 else 0
-    
-    # Perform McNemar's test with continuity correction
-    result = mcnemar(np.array([[0, b], [c, 0]]), exact=False, correction=True)
-    
+    """Perform McNemar's test on OVERALL predictions."""
+    y_pred_model1_arr = np.array(y_pred_model1)
+    y_pred_model2_arr = np.array(y_pred_model2)
+    y_true_arr = np.array(y_true)
+
+    correct_model1 = (y_pred_model1_arr == y_true_arr)
+    correct_model2 = (y_pred_model2_arr == y_true_arr)
+
+    b = np.sum(correct_model1 & ~correct_model2) # M1 correct, M2 wrong
+    c = np.sum(~correct_model1 & correct_model2) # M1 wrong, M2 correct
+    a = np.sum(correct_model1 & correct_model2)  # Both correct
+    d = np.sum(~correct_model1 & ~correct_model2) # Both wrong
+    cont_table = np.array([[a, b], [c, d]])
+
+    # Use exact test if discordant pairs are few, otherwise chi-square
+    n_discordant = b + c
+    if n_discordant == 0:
+         # Avoid division by zero or running test on no disagreements
+         print("Warning: No discordant pairs found for overall McNemar test.")
+         stat = 0
+         pval = 1.0
+    elif n_discordant < 25:
+        print(f"Using McNemar's exact test (b+c = {n_discordant} < 25)")
+        result = mcnemar(cont_table, exact=True) # correction=False is implied for exact=True
+        stat = result.statistic # May be NaN for exact test, focus on p-value
+        pval = result.pvalue
+    else:
+        print(f"Using McNemar's chi-square test (b+c = {n_discordant} >= 25)")
+        result = mcnemar(cont_table, exact=False, correction=False) # Chi-square without correction
+        stat = result.statistic
+        pval = result.pvalue
+
     return {
-        'statistic': statistic,
-        'p_value': result.pvalue,
-        'b': b,  # model1 correct, model2 wrong
-        'c': c,  # model1 wrong, model2 correct
-        'significant': result.pvalue < 0.05
+        'statistic': stat,
+        'p_value': pval,
+        'b': b,
+        'c': c,
+        'n_discordant': n_discordant,
+        'significant': pval < 0.05 if pval is not None else False
     }
+
+def perform_per_class_mcnemar(y_pred_model1, y_pred_model2, y_true, classes):
+    """Perform McNemar's test for each true class."""
+    y_pred_model1_arr = np.array(y_pred_model1)
+    y_pred_model2_arr = np.array(y_pred_model2)
+    y_true_arr = np.array(y_true)
+    results = {}
+
+    print("\n--- Per-Class McNemar's Test ---")
+    for target_class in classes:
+        print(f"Testing for TRUE class: {target_class}")
+        # Filter data for the current true class
+        indices = np.where(y_true_arr == target_class)[0]
+        if len(indices) == 0:
+            print(f"  No instances found for class {target_class}. Skipping.")
+            continue
+
+        y_true_subset = y_true_arr[indices]
+        y_pred1_subset = y_pred_model1_arr[indices]
+        y_pred2_subset = y_pred_model2_arr[indices]
+
+        # Check correctness *within this subset*
+        # Correct means predicting the target_class
+        correct_model1 = (y_pred1_subset == target_class)
+        correct_model2 = (y_pred2_subset == target_class)
+
+        b = np.sum(correct_model1 & ~correct_model2) # M1 correct, M2 wrong
+        c = np.sum(~correct_model1 & correct_model2) # M1 wrong, M2 correct
+        a = np.sum(correct_model1 & correct_model2)  # Both correct
+        d = np.sum(~correct_model1 & ~correct_model2) # Both wrong (predict wrong class)
+        cont_table = np.array([[a, b], [c, d]])
+
+        n_discordant = b + c
+        if n_discordant == 0:
+             print(f"  No discordant pairs found for class {target_class}.")
+             stat = 0
+             pval = 1.0
+             test_type = "N/A (No Discordance)"
+        elif n_discordant < 25:
+            print(f"  Using McNemar's exact test (b+c = {n_discordant} < 25)")
+            result = mcnemar(cont_table, exact=True)
+            stat = result.statistic # May be NaN for exact test
+            pval = result.pvalue
+            test_type = "Exact Binomial"
+        else:
+            print(f"  Using McNemar's chi-square test (b+c = {n_discordant} >= 25)")
+            result = mcnemar(cont_table, exact=False, correction=False)
+            stat = result.statistic
+            pval = result.pvalue
+            test_type = "Chi-Square (no correction)"
+
+        results[target_class] = {
+            'statistic': stat,
+            'p_value': pval,
+            'b (M1✓, M2X)': b,
+            'c (M1X, M2✓)': c,
+            'n_discordant': n_discordant,
+            'test_type': test_type,
+            'significant': pval < 0.05 if pval is not None else False
+        }
+        print(f"  Results: p={pval:.4f}, b={b}, c={c}, Significant={results[target_class]['significant']}")
+
+    print("--- End Per-Class McNemar's Test ---")
+    return results
 
 def plot_confusion_matrices(y_true_model1, y_pred_model1, y_true_model2, y_pred_model2, 
                             classes, titles, output_path):
@@ -403,33 +480,63 @@ def compare_models(model1_path, model2_path, test_data_path, output_path,
     print("Metrics calculated by model_comparison.py:")
     print(comparison_df)
 
-    # --- Perform McNemar's Test (using this script's predictions) ---
-    print("\nPerforming McNemar's test for statistical significance...")
-    mcnemar_result = perform_mcnemar_test(y_pred1_names, y_pred2_names, y_true1_names)
-    # ... (save McNemar results as before, using output_path) ...
+    # --- Perform McNemar's Test (Overall) ---
+    print("\nPerforming McNemar's test for OVERALL statistical significance...")
+    # Use the consistent true labels (e.g., y_true1_names)
+    overall_mcnemar_result = perform_mcnemar_test(y_pred1_names, y_pred2_names, y_true1_names)
+
     mcnemar_file = output_path / 'mcnemar_test_results.txt' # Use Path object
     with open(mcnemar_file, 'w') as f:
-        # ... (write McNemar results as before) ...
-        f.write(f"McNemar's Test Results ({model1_name} vs {model2_name}):\n")
-        f.write(f"Contingency Table (preds vs true):\n")
-        f.write(f"Model 1 correct & Model 2 incorrect (b): {mcnemar_result['b']}\n")
-        f.write(f"Model 1 incorrect & Model 2 correct (c): {mcnemar_result['c']}\n\n")
-        f.write(f"Chi-squared statistic: {mcnemar_result['statistic']:.4f}\n")
-        f.write(f"p-value: {mcnemar_result['p_value']:.4f}\n")
-        f.write(f"Significant difference (p < 0.05): {mcnemar_result['significant']}\n\n")
+        f.write(f"--- Overall McNemar's Test Results ({model1_name} vs {model2_name}) ---\n")
+        f.write(f"Model 1 correct & Model 2 incorrect (b): {overall_mcnemar_result['b']}\n")
+        f.write(f"Model 1 incorrect & Model 2 correct (c): {overall_mcnemar_result['c']}\n")
+        f.write(f"Total Discordant Pairs (b+c): {overall_mcnemar_result['n_discordant']}\n\n")
+        f.write(f"Statistic: {overall_mcnemar_result['statistic']:.4f}\n") # Chi2 or NaN
+        f.write(f"p-value: {overall_mcnemar_result['p_value']:.4f}\n")
+        f.write(f"Significant difference (p < 0.05): {overall_mcnemar_result['significant']}\n\n")
         # Interpretation
-        if mcnemar_result['p_value'] < 0.05:
-            if mcnemar_result['b'] > mcnemar_result['c']:
-                interpretation = f"{model1_name} performs SIGNIFICANTLY BETTER than {model2_name}"
-            elif mcnemar_result['c'] > mcnemar_result['b']:
-                interpretation = f"{model2_name} performs SIGNIFICANTLY BETTER than {model1_name}"
-            else:
-                interpretation = "Significant difference, but counts b and c are equal - check data."
+        if overall_mcnemar_result['p_value'] < 0.05:
+             if overall_mcnemar_result['b'] > overall_mcnemar_result['c']:
+                 interpretation = f"{model1_name} performs SIGNIFICANTLY BETTER overall than {model2_name}"
+             elif overall_mcnemar_result['c'] > overall_mcnemar_result['b']:
+                 interpretation = f"{model2_name} performs SIGNIFICANTLY BETTER overall than {model1_name}"
+             else:
+                 interpretation = "Significant difference overall, but discordant counts b and c are equal."
         else:
-            interpretation = f"No statistically significant difference between {model1_name} and {model2_name}"
-        f.write(f"Interpretation: {interpretation}\n")
-    print(f"McNemar's test results saved to: {mcnemar_file}")
+             interpretation = f"No statistically significant difference overall between {model1_name} and {model2_name}"
+        f.write(f"Overall Interpretation: {interpretation}\n")
+    print(f"Overall McNemar's test results saved to: {mcnemar_file}")
     print(interpretation)
+
+    # --- Perform Per-Class McNemar's Test ---
+    per_class_mcnemar_results = perform_per_class_mcnemar(y_pred1_names, y_pred2_names, y_true1_names, class_names)
+
+    # Append per-class results to the same file
+    with open(mcnemar_file, 'a') as f: # Open in append mode
+        f.write("\n\n--- Per-Class McNemar's Test Results ---\n")
+        for target_class, result in per_class_mcnemar_results.items():
+            f.write(f"\nTrue Class: {target_class}\n")
+            f.write(f"  Test Type: {result['test_type']}\n")
+            f.write(f"  Model 1 correct & Model 2 incorrect (b): {result['b (M1✓, M2X)']}\n")
+            f.write(f"  Model 1 incorrect & Model 2 correct (c): {result['c (M1X, M2✓)']}\n")
+            f.write(f"  Discordant Pairs (b+c): {result['n_discordant']}\n")
+            f.write(f"  Statistic: {result['statistic']:.4f}\n") # May be NaN for exact
+            f.write(f"  p-value: {result['p_value']:.4f}\n")
+            f.write(f"  Significant difference (p < 0.05): {result['significant']}\n")
+            # Per-class interpretation
+            if result['p_value'] < 0.05:
+                 if result['b (M1✓, M2X)'] > result['c (M1X, M2✓)']:
+                     class_interpretation = f"  Interpretation: {model1_name} is significantly better than {model2_name} for class '{target_class}'."
+                 elif result['c (M1X, M2✓)'] > result['b (M1✓, M2X)']:
+                     class_interpretation = f"  Interpretation: {model2_name} is significantly better than {model1_name} for class '{target_class}'."
+                 else:
+                     class_interpretation = f"  Interpretation: Significant difference for class '{target_class}', but discordant counts are equal."
+            else:
+                 class_interpretation = f"  Interpretation: No significant difference between models for class '{target_class}'."
+                 if result['n_discordant'] < 5: # Add warning for low power
+                      class_interpretation += " (Note: Low number of discordant pairs limits test power)."
+            f.write(class_interpretation + "\n")
+    print(f"Per-class McNemar's test results appended to: {mcnemar_file}")
 
 
     # --- Generate Plots (using this script's predictions/metrics) ---
