@@ -1,6 +1,6 @@
 SEED: 12345 # Random seed for reproducibility of sampled datasets and model initialisation
 MODEL: 'ENS' # Using EfficientNetV2S for this project
-SAVEFILE: 'possum_disease' # Base filename to save models
+SAVEFILE: 'possum_disease_not_frozen' # Base filename to save models
 OUTPUT_PATH: '/scratch/c.c1767198/output/rumpy_possum_train' # Save Path for output files
 
 # HuggingFace Model (leave as NA to use ImageNet weights)
