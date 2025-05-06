@@ -33,7 +33,7 @@ LEARNING_RATE: 1e-4
 BATCH_SIZE: 16
 NUM_AUG: 3
 
-FROZ_EPOCH: 10 # Number of epochs to train the frozen model
+FROZ_EPOCH: 0 # Number of epochs to train the frozen model
 
 BUF: 1 # Blocks to unfreeze for fine-tuning 
 PROG_STAGE_LEN: 7  # Number of progressive fine-tuning epochs 
