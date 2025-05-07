@@ -62,3 +62,16 @@ CLASS_SAMPLES_SPECIFIC:
     CLASS: "12"    # visible signs of disease
   - SAMPLES: 1300  # Use all available data
     CLASS: "99"    # occluded
+
+# Add these curriculum learning parameters
+USE_CURRICULUM: true
+CURRICULUM_STAGES: 4  # Number of curriculum stages
+PSEUDO_LABEL_MIN_CONFIDENCE: 0.7  # Minimum confidence threshold for any pseudo-label
+
+# Add these parameters for iterative self-learning
+USE_ITERATIVE: true  # Set to true to use iterative self-learning
+ITERATIVE_ITERATIONS: 3  # Number of iterations
+INITIAL_CONFIDENCE: 0.99  # Starting confidence threshold
+MIN_CONFIDENCE: 0.7  # Minimum confidence threshold for final iteration
+INITIAL_EPOCHS: 15  # Number of epochs for first iteration
+CURRICULUM_EPOCHS: 10  # Number of epochs for subsequent iterations
