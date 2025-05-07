@@ -209,7 +209,7 @@ def fit_frozen(config, model, train_df, val_df, num_classes, df_size, img_size):
     return(hist, model)  
         
 # Fine-tunes the model progressively with blocks unfrozen and increasing regularisation
-def fit_progressive(config, model, prog_train, val_df, output_fpath, img_size): 
+def fit_progressive(config, model, prog_train, val_df, output_fpath, img_size, class_weights=None): 
     if model._compile_loss is None:
         print(">>> Error: Model NOT compiled.")
         sys.exit(1)
@@ -245,15 +245,23 @@ def fit_progressive(config, model, prog_train, val_df, output_fpath, img_size):
             dataset_index = i % len(prog_train)
             train_ds = create_tensorset(prog_train[dataset_index], img_size, batch_size=config['BATCH_SIZE'], 
                                         magnitude=magnitude, n_augments=config['NUM_AUG'], ds_name="train")            
-            history = model.fit(train_ds, initial_epoch=i, epochs=(i+1), validation_data=val_ds) 
+            
+            # Apply class_weights if they are provided and if USE_CLASS_WEIGHTS is enabled
+            if class_weights is not None and config.get('USE_CLASS_WEIGHTS', False):
+                history = model.fit(train_ds, initial_epoch=i, epochs=(i+1), validation_data=val_ds, class_weight=class_weights)
+            else:
+                history = model.fit(train_ds, initial_epoch=i, epochs=(i+1), validation_data=val_ds) 
+                
             histories.append(history)
             epoch_val_loss = history.history['val_loss'][-1] # check on non-augmented validation data to see if best epoch
-            if epoch_val_loss < lowest_loss: # save model only if current val loss is better than any previous epoch
+            if epoch_val_loss < lowest_loss: # save best model
                 lowest_loss = epoch_val_loss
-                saving.save_model(model, best_model_fpath, include_optimizer=False)
-                print('New best-performing model epoch saved as: {}'.format(best_model_fpath))
-    hhs = {kk: np.ravel([hh.history[kk] for hh in histories]).astype("float").tolist() for kk in history.history.keys()}
-    return(hhs, model, best_model_fpath)
+                model.save(best_model_fpath)
+                print(">>> VAL_LOSS improved to: {} at epoch {} - model saved to: {}".format(lowest_loss, i+1, best_model_fpath))
+            else:
+                print(">>> VAL_LOSS degraded to: {} at epoch {} - best epoch has val_loss: {}".format(epoch_val_loss, i+1, lowest_loss))
+    
+    return histories, model, best_model_fpath
 
 # Calculates class-specific metrics for the best model
 def calc_class_metrics(model_fpath, test_fpath, output_fpath, classes, batch_size, img_size):
@@ -328,7 +336,6 @@ def calc_class_metrics(model_fpath, test_fpath, output_fpath, classes, batch_siz
     plt.xticks(rotation=90, ha='center')
     plt.savefig(os.path.join(output_fpath, "confusion_matrix.png"))
 
-# Add this function to lib_model.py or update the existing fit_progressive function to save histories
 def save_training_history(histories, output_path, model_name):
     """Save training metrics to a CSV file for later analysis"""
     
